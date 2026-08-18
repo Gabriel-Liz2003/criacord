@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.1 - 2026-08-17
+
+### Corrigido
+- Corrigida a montagem do comando PowerShell elevado usado para criar a regra do Firewall do Windows.
+- `Start-Process` e `exit $proc.ExitCode` agora são separados corretamente por `;`, evitando o erro `PositionalParameterNotFound` observado ao criar uma sala.
+- Adicionado teste automatizado para impedir regressão na montagem do comando de UAC/firewall.
+
 ## 0.1.0 - 2026-08-17
 
 ### Adicionado
