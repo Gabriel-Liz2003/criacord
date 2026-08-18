@@ -34,8 +34,8 @@ jobs:
         run: |
           $exe = Get-ChildItem -Path release -Recurse -Filter CriaCord.exe | Select-Object -First 1
           if (-not $exe) { throw 'win-unpacked/CriaCord.exe not found' }
-          & $exe.FullName --smoke-test
-          if ($LASTEXITCODE -ne 0) { throw "CriaCord smoke-test failed with $LASTEXITCODE" }
+          $process = Start-Process -FilePath $exe.FullName -ArgumentList '--smoke-test' -Wait -PassThru -NoNewWindow
+          if ($process.ExitCode -ne 0) { throw "CriaCord smoke-test failed with $($process.ExitCode)" }
       - name: Upload Windows build
         uses: actions/upload-artifact@v4
         with:
