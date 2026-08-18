@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Unit and integration tests
+        run: npm test
+      - name: Build renderer and Electron main
+        run: npm run build
+      - name: Build global PTT helper
+        run: npm run build:ptt
+      - name: Build Windows executables
+        run: npx electron-builder --win --x64 --publish never
+      - name: Smoke-test packaged executable
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Path release -Recurse -Filter CriaCord.exe | Select-Object -First 1
+          if (-not $exe) { throw 'win-unpacked/CriaCord.exe not found' }
+          & $exe.FullName --smoke-test
+          if ($LASTEXITCODE -ne 0) { throw "CriaCord smoke-test failed with $LASTEXITCODE" }
+      - name: Upload Windows build
+        uses: actions/upload-artifact@v4
+        with:
+          name: CriaCord-Windows
+          path: |
+            release/*.exe
+          if-no-files-found: error
