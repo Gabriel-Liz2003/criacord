@@ -42,6 +42,11 @@ export function subnetBroadcast(address: string, netmask: string): string {
   return ip.map((oct, i) => (oct & mask[i]) | (~mask[i] & 255)).join('.');
 }
 
+export function buildElevatedPowerShellCommand(encodedCommand: string): string {
+  const escapedEncoded = encodedCommand.replace(/'/g, "''");
+  return `$proc = Start-Process -FilePath 'powershell.exe' -Verb RunAs -Wait -PassThru -ArgumentList @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-EncodedCommand','${escapedEncoded}'); exit $proc.ExitCode`;
+}
+
 export async function ensureFirewallRule(exePath: string): Promise<{ ok: boolean; message: string }> {
   if (process.platform !== 'win32') {
     return { ok: false, message: 'A regra automática de firewall só é necessária/suportada no Windows.' };
@@ -55,11 +60,7 @@ export async function ensureFirewallRule(exePath: string): Promise<{ ok: boolean
   ].join('; ');
 
   const encoded = Buffer.from(firewallScript, 'utf16le').toString('base64');
-  const elevatedScript = [
-    `$proc = Start-Process -FilePath 'powershell.exe' -Verb RunAs -Wait -PassThru`,
-    `-ArgumentList @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-EncodedCommand','${encoded}')`,
-    `exit $proc.ExitCode`
-  ].join(' ');
+  const elevatedScript = buildElevatedPowerShellCommand(encoded);
 
   try {
     await execFileAsync(
