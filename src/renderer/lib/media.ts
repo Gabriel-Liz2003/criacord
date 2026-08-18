@@ -29,7 +29,7 @@ export async function tuneSender(sender: RTCRtpSender, maxBitrateBps: number, ma
 }
 
 export async function readOutboundVideoStats(pc: RTCPeerConnection, sender: RTCRtpSender, previous?: { bytes: number; at: number }): Promise<{ stats: StreamStats; sample: { bytes: number; at: number } }> {
-  const report = await pc.getStats(sender);
+  const report = await pc.getStats(sender.track ?? null);
   let outbound: any;
   let remoteInbound: any;
   let codec: any;
