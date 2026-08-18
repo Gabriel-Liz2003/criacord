@@ -1,0 +1,14 @@
+# Changelog
+
+## 0.1.0 - 2026-08-17
+
+### Adicionado
+- Aplicativo Electron/React autossuficiente.
+- Signaling local e mesh WebRTC.
+- Descoberta Radmin/LAN, convites e senha por challenge-response PBKDF2/HMAC.
+- Voz Opus com controles de chamada e PTT global Windows por helper nativo.
+- Compartilhamento até 1440p60 com áudio de sistema.
+- AV1/H.264, bitrate configurável e métricas WebRTC.
+- Reconexão de signaling, firewall com UAC e mensagens de erro de microfone/rede.
+- Privacidade sem gravação/telemetria, CSP e bloqueio de navegação externa.
+- CI, build Windows e publicação por GitHub Release.
