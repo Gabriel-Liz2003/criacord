@@ -1,0 +1,47 @@
+.call-stage{grid-template-columns:minmax(0,1fr) 320px}
+.stage-content{overflow:auto;align-content:start}
+.participants-panel{display:flex;flex-direction:column;overflow:hidden;padding:9px;min-height:0}
+.participants-list{overflow:auto;min-height:0}
+.panel-tabs{display:grid;grid-template-columns:1fr 1fr;gap:5px;padding:2px 2px 9px;border-bottom:1px solid #202634;margin-bottom:5px}
+.panel-tabs button{border:1px solid transparent;background:transparent;color:#7e899c;border-radius:8px;padding:8px 6px;font-size:10px;font-weight:800}
+.panel-tabs button b{font-size:9px;margin-left:3px;color:#657084}
+.panel-tabs button:hover{background:#151a24;color:#dce3ee}
+.panel-tabs button.active{background:#1b2130;border-color:#30394c;color:#fff}
+.panel-tabs button.active b{color:#9ea8ff}
+.streams-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(430px,100%),1fr));gap:12px;align-items:start}
+.stream-card{min-width:0;overflow:hidden;background:#050608;border:1px solid #262e3e;border-radius:14px;box-shadow:0 13px 35px #0003;display:flex;flex-direction:column}
+.self-stream-card{border-color:#35495d}
+.stream-header{height:46px;flex:0 0 auto;padding:0 12px;display:flex;align-items:center;justify-content:space-between;background:#111620;border-bottom:1px solid #202737}
+.stream-header>div{min-width:0;display:flex;flex-direction:column;gap:2px}
+.stream-header strong{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stream-header small{font-size:9px;color:#737e91}
+.live-badge{font-size:9px!important;color:#ff8593!important;text-transform:uppercase;font-weight:900;letter-spacing:.05em;white-space:nowrap}
+.self-badge{color:#71d9ff!important}
+.stream-video-wrap{width:100%;aspect-ratio:16/9;min-height:220px;max-height:min(62vh,720px);display:grid;place-items:center;background:#020304;overflow:hidden}
+.stream-video-wrap .remote-video{width:100%;height:100%;min-height:0;object-fit:contain}
+.stream-footer{min-height:40px;display:flex;align-items:center;padding:7px 10px;background:#0e131c;border-top:1px solid #202737;color:#758094;font-size:10px}
+.stream-audio-control{gap:8px}
+.stream-audio-control input[type=range]{flex:1;min-width:80px;accent-color:#7774ff}
+.stream-audio-control b{width:34px;text-align:right;font-size:9px;color:#8590a3}
+.stream-audio-button{width:30px;height:28px;border-radius:7px;border:1px solid #30394b;background:#181e29;color:#e5eaf2;display:grid;place-items:center;padding:0}
+.stream-audio-button:hover{background:#242c3a}
+.stream-audio-button.muted{background:#3b2028;border-color:#69313f}
+.chat-panel{flex:1;min-height:0;display:flex;flex-direction:column}
+.chat-messages{flex:1;min-height:0;overflow:auto;padding:7px 4px 10px;display:flex;flex-direction:column;gap:8px}
+.chat-empty{margin:auto;text-align:center;display:flex;flex-direction:column;gap:4px;color:#758094;font-size:10px;padding:20px}
+.chat-empty b{color:#aeb7c6;font-size:11px}
+.chat-message{padding:8px 9px;border-radius:9px;background:#131923;border:1px solid #202838}
+.chat-message.own{background:#18172a;border-color:#312f55}
+.chat-meta{display:flex;align-items:center;justify-content:space-between;gap:7px;margin-bottom:4px}
+.chat-meta strong{font-size:10px;color:#aeb8ca;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chat-message.own .chat-meta strong{color:#aaa8ff}
+.chat-meta time{font-size:8px;color:#596476;white-space:nowrap}
+.chat-message p{margin:0;font-size:11px;line-height:1.4;color:#d5dce7;white-space:pre-wrap;overflow-wrap:anywhere}
+.chat-form{border-top:1px solid #202634;padding-top:8px;display:flex;flex-direction:column;gap:6px}
+.chat-form textarea{width:100%;resize:none;min-height:62px;max-height:120px;background:#0b0f16;border:1px solid #293142;color:#eef2f8;border-radius:9px;padding:9px;outline:none;font:inherit;font-size:11px}
+.chat-form textarea:focus{border-color:#6865e7}
+.chat-form>div{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.chat-form small{font-size:8px;color:#626d80}
+.avatar.speaking{border-color:#4adf8b!important;box-shadow:0 0 0 1px #4adf8b33,0 0 16px #4adf8b66!important}
+@media(max-width:1180px){.call-stage{grid-template-columns:minmax(0,1fr) 270px}.streams-grid{grid-template-columns:1fr}.stream-video-wrap{min-height:180px}}
+@media(max-width:850px){.call-stage{grid-template-columns:1fr}.participants-panel{display:none}}

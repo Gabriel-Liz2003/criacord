@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { decodeInvite, encodeInvite } from '@shared/invite';
 import type { AppSettings, DiscoveredRoom, HostedRoom, NetworkInfo } from '@shared/types';
 import { useMediaSession } from '@renderer/hooks/useMediaSession';
@@ -7,6 +7,7 @@ import { ScreenShareModal } from '@renderer/components/ScreenShareModal';
 import { SettingsModal } from '@renderer/components/SettingsModal';
 
 function icon(label: string) { return <span aria-hidden="true">{label}</span>; }
+function timeLabel(timestamp: number) { return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); }
 
 export default function App() {
   const [settings, setSettings] = useState<AppSettings | null>(null);
@@ -24,6 +25,9 @@ export default function App() {
   const [uiError, setUiError] = useState('');
   const [version, setVersion] = useState('');
   const [gpuEncode, setGpuEncode] = useState('Detectando…');
+  const [panelTab, setPanelTab] = useState<'participants' | 'chat'>('participants');
+  const [chatInput, setChatInput] = useState('');
+  const chatEndRef = useRef<HTMLDivElement>(null);
   const media = useMediaSession(settings);
 
   useEffect(() => {
@@ -38,7 +42,12 @@ export default function App() {
     return () => { off(); void window.criacord.stopDiscovery(); };
   }, []);
 
-  const sharingParticipant = useMemo(() => media.participants.find((p) => p.sharing && p.screenStream), [media.participants]);
+  useEffect(() => {
+    if (panelTab === 'chat') chatEndRef.current?.scrollIntoView({ block: 'nearest' });
+  }, [media.chatMessages.length, panelTab]);
+
+  const remoteStreams = useMemo(() => media.participants.filter((participant) => participant.sharing && participant.screenStream), [media.participants]);
+  const streamCount = remoteStreams.length + (media.sharing && media.localScreenStream ? 1 : 0);
 
   async function saveSettings(patch: Partial<AppSettings>) {
     const saved = await window.criacord.saveSettings(patch);
@@ -81,7 +90,16 @@ export default function App() {
 
   async function leave() {
     media.disconnect();
+    setPanelTab('participants');
+    setChatInput('');
     if (hosted) { await window.criacord.stopHosting(); setHosted(null); }
+  }
+
+  function submitChat(event: React.FormEvent) {
+    event.preventDefault();
+    if (!chatInput.trim()) return;
+    media.sendChat(chatInput);
+    setChatInput('');
   }
 
   if (!settings || !network) return <div className="splash"><div className="logo-mark">C</div><strong>CriaCord</strong><span>Iniciando…</span></div>;
@@ -104,7 +122,7 @@ export default function App() {
     </aside>
 
     <main className="main-area">
-      <header className="topbar"><div><h1>{media.connected ? media.roomName : 'CriaCord'}</h1><p>{media.connected ? `${media.participants.length + 1} participante(s)` : 'Voz e transmissão privada, sem gravação.'}</p></div>
+      <header className="topbar"><div><h1>{media.connected ? media.roomName : 'CriaCord'}</h1><p>{media.connected ? `${media.participants.length + 1} participante(s) · ${streamCount} stream(s)` : 'Voz e transmissão privada, sem gravação.'}</p></div>
         {media.connected && hosted && <button className="secondary compact" onClick={() => void window.criacord.copyText(hosted.inviteCode)}>Copiar convite</button>}
       </header>
 
@@ -113,7 +131,7 @@ export default function App() {
       {!media.connected ? <section className="home-panel">
         <div className="hero-card"><div className="hero-badge">P2P • PRIVADO</div><h2>Converse e transmita sem complicação.</h2><p>Crie uma sala, mande o convite e pronto. O CriaCord não grava nem armazena suas chamadas ou transmissões.</p>
           <div className="hero-actions"><button className="primary large" onClick={() => setShowCreate(true)}>Criar sala</button><button className="secondary large" onClick={() => setShowJoin(true)}>Entrar com convite</button></div>
-          <div className="feature-row"><span>🎙 Opus 48 kHz</span><span>🖥 Até 1440p60</span><span>🔊 Áudio do PC</span><span>🔐 WebRTC P2P</span></div>
+          <div className="feature-row"><span>🎙 Opus 48 kHz</span><span>🖥 Até 1440p60</span><span>🔊 Áudio do PC</span><span>💬 Chat local</span><span>🔐 WebRTC P2P</span></div>
         </div>
         <div className="status-grid">
           <div className="status-card"><small>REDE PREFERIDA</small><strong>{network.preferred?.name ?? 'Não detectada'}</strong><span>{network.preferred?.address ?? '—'}</span></div>
@@ -122,15 +140,39 @@ export default function App() {
         </div>
       </section> : <section className="call-stage">
         <div className="stage-content">
-          {sharingParticipant ? <div className="stream-view"><div className="stream-header"><strong>{sharingParticipant.displayName} está transmitindo</strong><span>Ao vivo</span></div><RemoteVideo stream={sharingParticipant.screenStream} /></div> : <div className="call-placeholder"><div className="avatar huge">{settings.displayName.slice(0, 1).toUpperCase()}</div><h2>{media.sharing ? 'Você está transmitindo' : 'Chamada conectada'}</h2><p>{media.sharing ? 'A transmissão está sendo enviada diretamente aos participantes.' : 'Inicie uma transmissão de tela ou continue na chamada de voz.'}</p></div>}
+          {streamCount > 0 ? <div className="streams-grid">
+            {media.sharing && media.localScreenStream && <article className="stream-card self-stream-card">
+              <div className="stream-header"><div><strong>Você está transmitindo</strong><small>Preview local</small></div><span className="live-badge self-badge">SUA STREAM</span></div>
+              <div className="stream-video-wrap"><RemoteVideo stream={media.localScreenStream} /></div>
+              <div className="stream-footer"><span>🔇 O áudio da sua própria stream não é reproduzido aqui para evitar eco.</span></div>
+            </article>}
+            {remoteStreams.map((participant) => <article className="stream-card" key={participant.id}>
+              <div className="stream-header"><div><strong>{participant.displayName}</strong><small>Transmitindo agora</small></div><span className="live-badge">AO VIVO</span></div>
+              <div className="stream-video-wrap"><RemoteVideo stream={participant.screenStream} /></div>
+              <div className="stream-footer stream-audio-control">
+                <button className={`stream-audio-button ${participant.streamMuted ? 'muted' : ''}`} title={participant.streamMuted ? 'Ativar áudio desta stream' : 'Silenciar esta stream'} onClick={() => media.toggleParticipantStreamMute(participant.id)}>{participant.streamMuted ? '🔇' : '🔊'}</button>
+                <input aria-label={`Volume da stream de ${participant.displayName}`} type="range" min="0" max="1" step="0.05" value={participant.streamVolume} onChange={(event) => media.setParticipantStreamVolume(participant.id, Number(event.target.value))} />
+                <b>{Math.round(participant.streamVolume * 100)}%</b>
+              </div>
+              <RemoteAudio stream={participant.screenStream} volume={participant.streamVolume} muted={media.deafened || participant.streamMuted} outputDeviceId={settings.outputDeviceId} />
+            </article>)}
+          </div> : <div className="call-placeholder"><div className={`avatar huge ${media.selfSpeaking ? 'speaking' : ''}`}>{settings.displayName.slice(0, 1).toUpperCase()}</div><h2>Chamada conectada</h2><p>Inicie uma transmissão de tela ou continue na chamada de voz. Quando houver várias streams, elas aparecerão juntas aqui.</p></div>}
+
           {media.sharing && <div className="stats-panel"><div className="stats-title">Qualidade entregue</div>{Object.entries(media.shareStats).length === 0 ? <small>Aguardando estatísticas dos peers…</small> : Object.entries(media.shareStats).map(([peerId, stats]) => <div className="stats-row" key={peerId}>
             <span>{media.participants.find((p) => p.id === peerId)?.displayName ?? peerId.slice(0, 6)}</span>
             <b>{stats.resolution}</b><b>{stats.fps.toFixed(0)} FPS</b><b>{stats.bitrateMbps.toFixed(1)} Mbps</b><span>{stats.rttMs.toFixed(0)} ms / {stats.jitterMs.toFixed(1)}j</span><span>{stats.packetLossPercent.toFixed(1)}% loss</span><span>{stats.codec} · drop {stats.framesDropped}</span>
           </div>)}</div>}
         </div>
-        <aside className="participants-panel"><div className="participants-title">Participantes — {media.participants.length + 1}</div>
-          <div className="participant self"><div className={`avatar ${!media.muted ? 'speaking-soft' : ''}`}>{settings.displayName.slice(0, 1).toUpperCase()}</div><div className="participant-info"><strong>{settings.displayName} <small>(você)</small></strong><span>{media.muted ? 'Microfone desligado' : media.sharing ? 'Transmitindo' : 'Conectado'}</span></div>{media.muted && <span>🔇</span>}</div>
-          {media.participants.map((p) => <div className="participant" key={p.id}><div className={`avatar ${p.speaking ? 'speaking' : ''}`}>{p.displayName.slice(0, 1).toUpperCase()}</div><div className="participant-info"><strong>{p.displayName}</strong><span>{p.sharing ? 'Transmitindo tela' : p.speaking ? 'Falando' : 'Na chamada'}</span><input aria-label={`Volume de ${p.displayName}`} type="range" min="0" max="1" step="0.05" value={p.volume} onChange={(e) => media.setParticipantVolume(p.id, Number(e.target.value))} /></div>{p.muted && <span>🔇</span>}<RemoteAudio stream={p.micStream} volume={p.volume} muted={media.deafened} outputDeviceId={settings.outputDeviceId} />{p.screenStream && <RemoteAudio stream={p.screenStream} volume={p.volume} muted={media.deafened} outputDeviceId={settings.outputDeviceId} />}</div>)}
+
+        <aside className="participants-panel">
+          <div className="panel-tabs"><button className={panelTab === 'participants' ? 'active' : ''} onClick={() => setPanelTab('participants')}>Participantes <b>{media.participants.length + 1}</b></button><button className={panelTab === 'chat' ? 'active' : ''} onClick={() => setPanelTab('chat')}>Chat <b>{media.chatMessages.length}</b></button></div>
+          {panelTab === 'participants' ? <div className="participants-list">
+            <div className="participant self"><div className={`avatar ${media.selfSpeaking ? 'speaking' : ''}`}>{settings.displayName.slice(0, 1).toUpperCase()}</div><div className="participant-info"><strong>{settings.displayName} <small>(você)</small></strong><span>{media.muted ? 'Microfone desligado' : media.selfSpeaking ? 'Falando' : media.sharing ? 'Transmitindo' : 'Conectado'}</span></div>{media.muted && <span>🔇</span>}</div>
+            {media.participants.map((participant) => <div className="participant" key={participant.id}><div className={`avatar ${participant.speaking ? 'speaking' : ''}`}>{participant.displayName.slice(0, 1).toUpperCase()}</div><div className="participant-info"><strong>{participant.displayName}</strong><span>{participant.sharing ? 'Transmitindo tela' : participant.speaking ? 'Falando' : 'Na chamada'}</span><input aria-label={`Volume do microfone de ${participant.displayName}`} type="range" min="0" max="1" step="0.05" value={participant.volume} onChange={(event) => media.setParticipantVolume(participant.id, Number(event.target.value))} /></div>{participant.muted && <span>🔇</span>}<RemoteAudio stream={participant.micStream} volume={participant.volume} muted={media.deafened} outputDeviceId={settings.outputDeviceId} /></div>)}
+          </div> : <div className="chat-panel">
+            <div className="chat-messages">{media.chatMessages.length === 0 ? <div className="chat-empty"><b>Nenhuma mensagem ainda.</b><span>O chat fica somente na memória da sala.</span></div> : media.chatMessages.map((message) => <div className={`chat-message ${message.from === media.selfId ? 'own' : ''}`} key={message.id}><div className="chat-meta"><strong>{message.from === media.selfId ? 'Você' : message.displayName}</strong><time>{timeLabel(message.timestamp)}</time></div><p>{message.text}</p></div>)}<div ref={chatEndRef} /></div>
+            <form className="chat-form" onSubmit={submitChat}><textarea value={chatInput} maxLength={1000} placeholder="Mensagem para a sala…" onChange={(event) => setChatInput(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); if (chatInput.trim()) { media.sendChat(chatInput); setChatInput(''); } } }} /><div><small>{chatInput.length}/1000</small><button className="primary compact" type="submit" disabled={!chatInput.trim()}>Enviar</button></div></form>
+          </div>}
         </aside>
       </section>}
 

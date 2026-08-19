@@ -93,6 +93,38 @@ describe('RoomServer', () => {
     a.close(); b.close();
   });
 
+  it('relays text chat to the room and gives history to a later participant', async () => {
+    const server = new RoomServer(); servers.push(server);
+    const room = await server.start('Chat');
+
+    const a = new WebSocket(`ws://127.0.0.1:${room.port}`);
+    const challengeA = nextMessage(a);
+    await new Promise<void>((resolve) => a.once('open', () => resolve()));
+    const welcomeA = await join(a, challengeA, room.roomCode, 'Alice', 'clientChatAlice', '');
+
+    const b = new WebSocket(`ws://127.0.0.1:${room.port}`);
+    const challengeB = nextMessage(b);
+    await new Promise<void>((resolve) => b.once('open', () => resolve()));
+    await join(b, challengeB, room.roomCode, 'Bob', 'clientChatBob', '');
+    await nextMessage(a); // peer-joined
+
+    a.send(JSON.stringify({ type: 'chat', text: 'oi da sala' }));
+    const chatForA = await nextMessage(a);
+    const chatForB = await nextMessage(b);
+    expect(chatForA).toMatchObject({ type: 'chat', from: welcomeA.selfId, displayName: 'Alice', text: 'oi da sala' });
+    expect(chatForB).toMatchObject({ id: chatForA.id, type: 'chat', from: welcomeA.selfId, text: 'oi da sala' });
+    expect(typeof chatForA.timestamp).toBe('number');
+
+    const c = new WebSocket(`ws://127.0.0.1:${room.port}`);
+    const challengeC = nextMessage(c);
+    await new Promise<void>((resolve) => c.once('open', () => resolve()));
+    const welcomeC = await join(c, challengeC, room.roomCode, 'Carol', 'clientChatCarol', '');
+    expect(welcomeC.chatHistory).toHaveLength(1);
+    expect(welcomeC.chatHistory[0]).toMatchObject({ id: chatForA.id, displayName: 'Alice', text: 'oi da sala' });
+
+    a.close(); b.close(); c.close();
+  });
+
   it('rejects an invalid password proof', async () => {
     const server = new RoomServer(); servers.push(server);
     const room = await server.start('Teste', 'certa');

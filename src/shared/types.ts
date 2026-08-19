@@ -61,16 +61,25 @@ export interface InvitePayload {
   room: string;
 }
 
+export interface ChatMessage {
+  id: string;
+  from: string;
+  displayName: string;
+  text: string;
+  timestamp: number;
+}
+
 export type SignalPayload = RTCSessionDescriptionInit | RTCIceCandidateInit;
 
 export type WireMessage =
   | { type: 'auth-challenge'; required: boolean; salt?: string; nonce: string; iterations: number }
   | { type: 'join'; roomCode: string; displayName: string; clientId: string; passwordProof?: string }
-  | { type: 'welcome'; selfId: string; roomName: string; peers: Array<{ id: string; displayName: string }> }
+  | { type: 'welcome'; selfId: string; roomName: string; peers: Array<{ id: string; displayName: string }>; chatHistory?: ChatMessage[] }
   | { type: 'peer-joined'; peer: { id: string; displayName: string } }
   | { type: 'peer-left'; peerId: string }
   | { type: 'signal'; from?: string; to: string; signalType: 'offer' | 'answer' | 'ice'; payload: SignalPayload }
   | { type: 'presence'; from?: string; to?: string; speaking?: boolean; sharing?: boolean; muted?: boolean; deafened?: boolean }
+  | { type: 'chat'; text: string; from?: string; displayName?: string; timestamp?: number; id?: string }
   | { type: 'error'; code: string; message: string }
   | { type: 'ping'; t: number }
   | { type: 'pong'; t: number };
@@ -83,6 +92,8 @@ export interface Participant {
   deafened: boolean;
   sharing: boolean;
   volume: number;
+  streamVolume: number;
+  streamMuted: boolean;
   micStream?: MediaStream;
   screenStream?: MediaStream;
 }
