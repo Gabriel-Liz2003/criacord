@@ -1,6 +1,6 @@
 {
   "name": "criacord",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Private zero-config voice and high-quality screen sharing for small groups.",
   "main": "dist-electron/main/index.js",
   "author": "CriaCord",
