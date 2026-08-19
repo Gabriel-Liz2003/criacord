@@ -4,7 +4,7 @@ import { EventEmitter } from 'node:events';
 import WebSocket, { WebSocketServer } from 'ws';
 import { DISCOVERY_MAGIC, DISCOVERY_PORT, SIGNALING_PORT } from '../shared/constants.js';
 import { encodeInvite } from '../shared/invite.js';
-import type { DiscoveredRoom, HostedRoom, WireMessage } from '../shared/types.js';
+import type { ChatMessage, DiscoveredRoom, HostedRoom, WireMessage } from '../shared/types.js';
 import { getNetworkInfo, subnetBroadcast } from './network.js';
 
 interface PresenceState {
@@ -28,6 +28,8 @@ function randomRoomCode(): string {
 }
 
 const PASSWORD_ITERATIONS = 180_000;
+const CHAT_HISTORY_LIMIT = 100;
+const CHAT_TEXT_LIMIT = 1000;
 
 function derivePasswordVerifier(password: string, salt: Buffer): Buffer {
   return crypto.pbkdf2Sync(password, salt, PASSWORD_ITERATIONS, 32, 'sha256');
@@ -51,11 +53,13 @@ export class RoomServer extends EventEmitter {
   private port = SIGNALING_PORT;
   private discoverySocket?: dgram.Socket;
   private announceTimer?: NodeJS.Timeout;
+  private chatHistory: ChatMessage[] = [];
 
   async start(roomName: string, password?: string): Promise<HostedRoom> {
     await this.stop();
     this.roomCode = randomRoomCode();
     this.roomName = roomName.trim() || 'Sala';
+    this.chatHistory = [];
     if (password) {
       this.passwordSalt = crypto.randomBytes(16);
       this.passwordHash = derivePasswordVerifier(password, this.passwordSalt);
@@ -145,7 +149,13 @@ export class RoomServer extends EventEmitter {
           socket,
           presence: { speaking: false, sharing: false, muted: false, deafened: false }
         });
-        safeSend(socket, { type: 'welcome', selfId: peerId, roomName: this.roomName, peers: existing });
+        safeSend(socket, {
+          type: 'welcome',
+          selfId: peerId,
+          roomName: this.roomName,
+          peers: existing,
+          chatHistory: this.chatHistory
+        });
         for (const p of this.peers.values()) {
           if (p.id !== peerId) safeSend(p.socket, { type: 'peer-joined', peer: { id: peerId, displayName } });
         }
@@ -171,6 +181,22 @@ export class RoomServer extends EventEmitter {
         for (const p of this.peers.values()) {
           if (p.id !== peerId && (!msg.to || p.id === msg.to)) safeSend(p.socket, presence);
         }
+      } else if (msg.type === 'chat') {
+        const sender = this.peers.get(peerId);
+        if (!sender) return;
+        const text = msg.text.trim().slice(0, CHAT_TEXT_LIMIT);
+        if (!text) return;
+        const chat: ChatMessage = {
+          id: crypto.randomUUID(),
+          from: peerId,
+          displayName: sender.displayName,
+          text,
+          timestamp: Date.now()
+        };
+        this.chatHistory.push(chat);
+        if (this.chatHistory.length > CHAT_HISTORY_LIMIT) this.chatHistory.splice(0, this.chatHistory.length - CHAT_HISTORY_LIMIT);
+        const payload: WireMessage = { type: 'chat', ...chat };
+        for (const p of this.peers.values()) safeSend(p.socket, payload);
       } else if (msg.type === 'ping') {
         safeSend(socket, { type: 'pong', t: msg.t });
       }
@@ -228,6 +254,7 @@ export class RoomServer extends EventEmitter {
     this.roomCode = '';
     this.passwordHash = undefined;
     this.passwordSalt = undefined;
+    this.chatHistory = [];
   }
 }
 
