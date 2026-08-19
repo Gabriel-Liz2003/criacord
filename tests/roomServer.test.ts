@@ -53,6 +53,46 @@ describe('RoomServer', () => {
     a.close(); b.close();
   });
 
+  it('preserves sharing when later presence updates only speaking state', async () => {
+    const server = new RoomServer(); servers.push(server);
+    const room = await server.start('Presença');
+
+    const a = new WebSocket(`ws://127.0.0.1:${room.port}`);
+    const challengeA = nextMessage(a);
+    await new Promise<void>((resolve) => a.once('open', () => resolve()));
+    await join(a, challengeA, room.roomCode, 'A', 'clientPresenceA', '');
+
+    const b = new WebSocket(`ws://127.0.0.1:${room.port}`);
+    const challengeB = nextMessage(b);
+    await new Promise<void>((resolve) => b.once('open', () => resolve()));
+    const welcomeB = await join(b, challengeB, room.roomCode, 'B', 'clientPresenceB', '');
+    await nextMessage(a); // peer-joined
+
+    b.send(JSON.stringify({ type: 'presence', sharing: true }));
+    const sharing = await nextMessage(a);
+    expect(sharing).toMatchObject({
+      type: 'presence',
+      from: welcomeB.selfId,
+      sharing: true,
+      speaking: false,
+      muted: false,
+      deafened: false
+    });
+
+    b.send(JSON.stringify({ type: 'presence', speaking: true }));
+    const speaking = await nextMessage(a);
+    expect(speaking).toMatchObject({
+      type: 'presence',
+      from: welcomeB.selfId,
+      sharing: true,
+      speaking: true,
+      muted: false,
+      deafened: false
+    });
+
+    a.close(); b.close();
+  });
+
   it('rejects an invalid password proof', async () => {
     const server = new RoomServer(); servers.push(server);
     const room = await server.start('Teste', 'certa');
