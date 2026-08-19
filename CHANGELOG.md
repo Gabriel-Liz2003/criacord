@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.2 - 2026-08-18
+
+### Corrigido
+- Corrigido o estado de presença que fazia a transmissão desaparecer para quem assistia após alguns segundos.
+- O servidor agora mantém o estado completo de cada participante e preserva `sharing`, `muted`, `deafened` e `speaking` quando recebe atualizações parciais.
+- Adicionado teste de regressão reproduzindo o caso em que `sharing: true` era perdido ao chegar uma atualização posterior contendo apenas `speaking`.
+
 ## 0.1.1 - 2026-08-17
 
 ### Corrigido
