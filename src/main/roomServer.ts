@@ -7,7 +7,14 @@ import { encodeInvite } from '../shared/invite.js';
 import type { DiscoveredRoom, HostedRoom, WireMessage } from '../shared/types.js';
 import { getNetworkInfo, subnetBroadcast } from './network.js';
 
-interface PeerMeta { id: string; displayName: string; socket: WebSocket }
+interface PresenceState {
+  speaking: boolean;
+  sharing: boolean;
+  muted: boolean;
+  deafened: boolean;
+}
+
+interface PeerMeta { id: string; displayName: string; socket: WebSocket; presence: PresenceState }
 interface DiscoveryPacket {
   magic: string;
   roomCode: string;
@@ -132,7 +139,12 @@ export class RoomServer extends EventEmitter {
         clearTimeout(joinTimer);
         const displayName = msg.displayName.trim().slice(0, 40) || 'Usuário';
         const existing = [...this.peers.values()].map((p) => ({ id: p.id, displayName: p.displayName }));
-        this.peers.set(peerId, { id: peerId, displayName, socket });
+        this.peers.set(peerId, {
+          id: peerId,
+          displayName,
+          socket,
+          presence: { speaking: false, sharing: false, muted: false, deafened: false }
+        });
         safeSend(socket, { type: 'welcome', selfId: peerId, roomName: this.roomName, peers: existing });
         for (const p of this.peers.values()) {
           if (p.id !== peerId) safeSend(p.socket, { type: 'peer-joined', peer: { id: peerId, displayName } });
@@ -144,8 +156,20 @@ export class RoomServer extends EventEmitter {
         const dest = this.peers.get(msg.to);
         if (dest) safeSend(dest.socket, { ...msg, from: peerId });
       } else if (msg.type === 'presence') {
+        const sender = this.peers.get(peerId);
+        if (!sender) return;
+        if (typeof msg.speaking === 'boolean') sender.presence.speaking = msg.speaking;
+        if (typeof msg.sharing === 'boolean') sender.presence.sharing = msg.sharing;
+        if (typeof msg.muted === 'boolean') sender.presence.muted = msg.muted;
+        if (typeof msg.deafened === 'boolean') sender.presence.deafened = msg.deafened;
+        const presence: WireMessage = {
+          type: 'presence',
+          from: peerId,
+          to: msg.to,
+          ...sender.presence
+        };
         for (const p of this.peers.values()) {
-          if (p.id !== peerId && (!msg.to || p.id === msg.to)) safeSend(p.socket, { ...msg, from: peerId });
+          if (p.id !== peerId && (!msg.to || p.id === msg.to)) safeSend(p.socket, presence);
         }
       } else if (msg.type === 'ping') {
         safeSend(socket, { type: 'pong', t: msg.t });
