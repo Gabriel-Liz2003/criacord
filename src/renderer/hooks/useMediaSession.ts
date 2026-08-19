@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { AppSettings, CodecPreference, Participant, StreamStats, WireMessage } from '@shared/types';
+import type { AppSettings, ChatMessage, CodecPreference, Participant, StreamStats, WireMessage } from '@shared/types';
 import { getSupportedVideoCodecs, preferVideoCodec, readOutboundVideoStats, tuneSender } from '@renderer/lib/media';
 import { createPasswordProof } from '@renderer/lib/auth';
 
@@ -14,6 +14,8 @@ interface PeerRuntime {
   control?: RTCDataChannel;
   screenSender?: RTCRtpSender;
   screenAudioSender?: RTCRtpSender;
+  remoteMicStream?: MediaStream;
+  remoteScreenStream?: MediaStream;
   sample?: { bytes: number; at: number };
   recvSample?: { bytes: number; at: number };
 }
@@ -26,6 +28,25 @@ function clientId(): string {
   return id;
 }
 
+function participantDefaults(peer: { id: string; displayName: string }): Participant {
+  return {
+    ...peer,
+    speaking: false,
+    muted: false,
+    deafened: false,
+    sharing: false,
+    volume: 1,
+    streamVolume: 1,
+    streamMuted: false
+  };
+}
+
+function addUniqueTrack(stream: MediaStream | undefined, track: MediaStreamTrack): MediaStream {
+  const target = stream ?? new MediaStream();
+  if (!target.getTracks().some((item) => item.id === track.id)) target.addTrack(track);
+  return target;
+}
+
 export function useMediaSession(settings: AppSettings | null) {
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [connected, setConnected] = useState(false);
@@ -35,6 +56,10 @@ export function useMediaSession(settings: AppSettings | null) {
   const [muted, setMutedState] = useState(false);
   const [deafened, setDeafened] = useState(false);
   const [sharing, setSharing] = useState(false);
+  const [selfSpeaking, setSelfSpeaking] = useState(false);
+  const [selfId, setSelfId] = useState('');
+  const [localScreenStream, setLocalScreenStream] = useState<MediaStream | undefined>(undefined);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [shareStats, setShareStats] = useState<Record<string, StreamStats>>({});
   const [supportedCodecs] = useState(() => getSupportedVideoCodecs());
 
@@ -83,11 +108,11 @@ export function useMediaSession(settings: AppSettings | null) {
     let stream: MediaStream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio, video: false });
-    } catch (error) {
-      const name = error instanceof DOMException ? error.name : '';
+    } catch (cause) {
+      const name = cause instanceof DOMException ? cause.name : '';
       if (name === 'NotAllowedError') throw new Error('Acesso ao microfone foi bloqueado. Permita o CriaCord nas configurações de privacidade do Windows.');
       if (name === 'NotFoundError' || name === 'DevicesNotFoundError') throw new Error('Nenhum microfone foi encontrado. Conecte um microfone ou escolha outro dispositivo nas configurações.');
-      throw new Error(`Não foi possível iniciar o microfone: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error(`Não foi possível iniciar o microfone: ${cause instanceof Error ? cause.message : String(cause)}`);
     }
     micStreamRef.current = stream;
     configureMicEnabled();
@@ -114,10 +139,10 @@ export function useMediaSession(settings: AppSettings | null) {
     const existing = peersRef.current.get(peerId);
     if (existing) return existing;
     const mic = await getMic();
-    const selfId = selfIdRef.current;
+    const ownId = selfIdRef.current;
     const runtime: PeerRuntime = {
       pc: new RTCPeerConnection({ iceServers: [], bundlePolicy: 'max-bundle' }),
-      polite: selfId.localeCompare(peerId) > 0,
+      polite: ownId.localeCompare(peerId) > 0,
       makingOffer: false,
       ignoreOffer: false,
       isSettingRemoteAnswerPending: false
@@ -139,7 +164,10 @@ export function useMediaSession(settings: AppSettings | null) {
           const transceiver = pc.getTransceivers().find((t) => t.sender === sender);
           if (transceiver && opts) preferVideoCodec(transceiver, opts.codec);
           if (opts) void tuneSender(sender, opts.bitrateMbps * 1_000_000, opts.fps);
-        } else { runtime.screenAudioSender = sender; void tuneSender(sender, 160_000); }
+        } else {
+          runtime.screenAudioSender = sender;
+          void tuneSender(sender, 160_000);
+        }
       }
     }
 
@@ -154,14 +182,37 @@ export function useMediaSession(settings: AppSettings | null) {
     attachControl(peerId, control);
 
     pc.ontrack = (event) => {
-      const stream = event.streams[0] ?? new MediaStream([event.track]);
-      if (event.track.kind === 'video' || stream.getVideoTracks().length) {
-        patchParticipant(peerId, { screenStream: stream, sharing: true });
+      let role: 'mic' | 'screen';
+      if (event.track.kind === 'video') {
+        role = 'screen';
       } else {
-        patchParticipant(peerId, { micStream: stream });
+        const audioTransceivers = pc.getTransceivers().filter((transceiver) => transceiver.receiver.track.kind === 'audio');
+        const audioIndex = audioTransceivers.indexOf(event.transceiver);
+        const incomingStreamHasVideo = event.streams.some((stream) => stream.getVideoTracks().length > 0);
+        role = audioIndex > 0 || incomingStreamHasVideo ? 'screen' : 'mic';
       }
+
+      if (role === 'screen') {
+        runtime.remoteScreenStream = addUniqueTrack(runtime.remoteScreenStream, event.track);
+        patchParticipant(peerId, { screenStream: runtime.remoteScreenStream, sharing: true });
+      } else {
+        runtime.remoteMicStream = addUniqueTrack(runtime.remoteMicStream, event.track);
+        patchParticipant(peerId, { micStream: runtime.remoteMicStream });
+      }
+
       event.track.onended = () => {
-        if (event.track.kind === 'video') patchParticipant(peerId, { screenStream: undefined, sharing: false });
+        if (role === 'screen') {
+          runtime.remoteScreenStream?.removeTrack(event.track);
+          if (event.track.kind === 'video' || !(runtime.remoteScreenStream?.getVideoTracks().length)) {
+            runtime.remoteScreenStream = undefined;
+            patchParticipant(peerId, { screenStream: undefined, sharing: false });
+          } else {
+            patchParticipant(peerId, { screenStream: runtime.remoteScreenStream });
+          }
+        } else {
+          runtime.remoteMicStream?.removeTrack(event.track);
+          patchParticipant(peerId, { micStream: runtime.remoteMicStream?.getAudioTracks().length ? runtime.remoteMicStream : undefined });
+        }
       };
     };
 
@@ -170,7 +221,7 @@ export function useMediaSession(settings: AppSettings | null) {
         runtime.makingOffer = true;
         await pc.setLocalDescription();
         if (pc.localDescription) send({ type: 'signal', to: peerId, signalType: 'offer', payload: pc.localDescription.toJSON() });
-      } catch (e) { console.error('negotiation', e); }
+      } catch (cause) { console.error('negotiation', cause); }
       finally { runtime.makingOffer = false; }
     };
     return runtime;
@@ -183,7 +234,7 @@ export function useMediaSession(settings: AppSettings | null) {
     try {
       if (msg.signalType === 'ice') {
         try { await pc.addIceCandidate(msg.payload as RTCIceCandidateInit); }
-        catch (e) { if (!runtime.ignoreOffer) throw e; }
+        catch (cause) { if (!runtime.ignoreOffer) throw cause; }
         return;
       }
       const description = msg.payload as RTCSessionDescriptionInit;
@@ -198,8 +249,8 @@ export function useMediaSession(settings: AppSettings | null) {
         await pc.setLocalDescription();
         if (pc.localDescription) send({ type: 'signal', to: msg.from, signalType: 'answer', payload: pc.localDescription.toJSON() });
       }
-    } catch (e) {
-      console.error('signal error', e);
+    } catch (cause) {
+      console.error('signal error', cause);
       setError('Falha ao negociar a conexão P2P com um participante.');
     }
   }, [createPeer, send]);
@@ -215,9 +266,9 @@ export function useMediaSession(settings: AppSettings | null) {
     wsRef.current = undefined;
     for (const runtime of peersRef.current.values()) runtime.pc.close();
     peersRef.current.clear();
-    micStreamRef.current?.getTracks().forEach((t) => t.stop());
+    micStreamRef.current?.getTracks().forEach((track) => track.stop());
     micStreamRef.current = undefined;
-    screenStreamRef.current?.getTracks().forEach((t) => t.stop());
+    screenStreamRef.current?.getTracks().forEach((track) => track.stop());
     screenStreamRef.current = undefined;
     selfIdRef.current = '';
     endpointRef.current = undefined;
@@ -226,6 +277,10 @@ export function useMediaSession(settings: AppSettings | null) {
     setConnected(false);
     setConnecting(false);
     setSharing(false);
+    setSelfSpeaking(false);
+    setSelfId('');
+    setLocalScreenStream(undefined);
+    setChatMessages([]);
     shareOptionsRef.current = undefined;
     setShareStats({});
     setRoomName('');
@@ -290,14 +345,16 @@ export function useMediaSession(settings: AppSettings | null) {
       }
       if (msg.type === 'welcome') {
         selfIdRef.current = msg.selfId;
+        setSelfId(msg.selfId);
         setRoomName(msg.roomName);
-        setParticipants(msg.peers.map((p) => ({ ...p, speaking: false, muted: false, deafened: false, sharing: false, volume: 1 })));
+        setParticipants(msg.peers.map(participantDefaults));
+        setChatMessages(msg.chatHistory ?? []);
         setConnected(true);
         setConnecting(false);
         reconnectAttemptsRef.current = 0;
         for (const peer of msg.peers) await createPeer(peer.id);
       } else if (msg.type === 'peer-joined') {
-        setParticipants((prev) => prev.some((p) => p.id === msg.peer.id) ? prev : [...prev, { ...msg.peer, speaking: false, muted: false, deafened: false, sharing: false, volume: 1 }]);
+        setParticipants((prev) => prev.some((p) => p.id === msg.peer.id) ? prev : [...prev, participantDefaults(msg.peer)]);
         await createPeer(msg.peer.id);
       } else if (msg.type === 'peer-left') {
         peersRef.current.get(msg.peerId)?.pc.close();
@@ -307,12 +364,21 @@ export function useMediaSession(settings: AppSettings | null) {
       } else if (msg.type === 'signal') {
         await handleSignal(msg);
       } else if (msg.type === 'presence' && msg.from) {
-        patchParticipant(msg.from, {
-          speaking: msg.speaking ?? undefined,
-          sharing: msg.sharing ?? undefined,
-          muted: msg.muted ?? undefined,
-          deafened: msg.deafened ?? undefined
-        });
+        const patch: Partial<Participant> = {};
+        if (typeof msg.speaking === 'boolean') patch.speaking = msg.speaking;
+        if (typeof msg.sharing === 'boolean') patch.sharing = msg.sharing;
+        if (typeof msg.muted === 'boolean') patch.muted = msg.muted;
+        if (typeof msg.deafened === 'boolean') patch.deafened = msg.deafened;
+        patchParticipant(msg.from, patch);
+      } else if (msg.type === 'chat' && msg.from && msg.displayName && msg.id && typeof msg.timestamp === 'number') {
+        const chat: ChatMessage = {
+          id: msg.id,
+          from: msg.from,
+          displayName: msg.displayName,
+          text: msg.text,
+          timestamp: msg.timestamp
+        };
+        setChatMessages((prev) => [...prev.slice(-99), chat]);
       }
     };
   }, [createPeer, disconnect, getMic, handleSignal, patchParticipant, send, settings]);
@@ -322,6 +388,10 @@ export function useMediaSession(settings: AppSettings | null) {
   const setMuted = useCallback((value: boolean) => {
     mutedRef.current = value;
     setMutedState(value);
+    if (value) {
+      setSelfSpeaking(false);
+      send({ type: 'presence', speaking: false });
+    }
     configureMicEnabled();
     send({ type: 'presence', muted: value });
   }, [configureMicEnabled, send]);
@@ -335,11 +405,20 @@ export function useMediaSession(settings: AppSettings | null) {
   }, [send]);
 
   const setParticipantVolume = useCallback((id: string, volume: number) => patchParticipant(id, { volume }), [patchParticipant]);
+  const setParticipantStreamVolume = useCallback((id: string, streamVolume: number) => patchParticipant(id, { streamVolume }), [patchParticipant]);
+  const toggleParticipantStreamMute = useCallback((id: string) => {
+    setParticipants((prev) => prev.map((participant) => participant.id === id ? { ...participant, streamMuted: !participant.streamMuted } : participant));
+  }, []);
+
+  const sendChat = useCallback((text: string) => {
+    const clean = text.trim().slice(0, 1000);
+    if (clean) send({ type: 'chat', text: clean });
+  }, [send]);
 
   const stopShare = useCallback(async () => {
     const stream = screenStreamRef.current;
     screenStreamRef.current = undefined;
-    stream?.getTracks().forEach((t) => t.stop());
+    stream?.getTracks().forEach((track) => track.stop());
     for (const runtime of peersRef.current.values()) {
       if (runtime.screenSender) {
         try { runtime.pc.removeTrack(runtime.screenSender); } catch { /* noop */ }
@@ -352,6 +431,7 @@ export function useMediaSession(settings: AppSettings | null) {
     }
     await window.criacord.selectDesktopSource(null);
     setSharing(false);
+    setLocalScreenStream(undefined);
     shareOptionsRef.current = undefined;
     setShareStats({});
     send({ type: 'presence', sharing: false });
@@ -359,6 +439,7 @@ export function useMediaSession(settings: AppSettings | null) {
 
   const startShare = useCallback(async (options: ShareOptions) => {
     await stopShare();
+    setError(null);
     await window.criacord.selectDesktopSource(options.sourceId);
     let stream: MediaStream;
     try {
@@ -370,9 +451,9 @@ export function useMediaSession(settings: AppSettings | null) {
         },
         audio: options.audio
       });
-    } catch (e) {
+    } catch (cause) {
       await window.criacord.selectDesktopSource(null);
-      throw e;
+      throw cause;
     }
     const video = stream.getVideoTracks()[0];
     if (!video) throw new Error('A captura de vídeo não foi iniciada.');
@@ -382,22 +463,23 @@ export function useMediaSession(settings: AppSettings | null) {
     const systemAudio = stream.getAudioTracks()[0];
     if (systemAudio) {
       try { await systemAudio.applyConstraints({ sampleRate: 48000, channelCount: 2 }); } catch { /* loopback device decides final format */ }
+    } else if (options.audio) {
+      setError('A transmissão iniciou sem áudio do computador. O Windows não entregou a faixa de loopback; tente selecionar outra fonte ou reiniciar a transmissão.');
     }
     screenStreamRef.current = stream;
+    setLocalScreenStream(stream);
     shareOptionsRef.current = options;
 
-    for (const [peerId, runtime] of peersRef.current) {
+    for (const runtime of peersRef.current.values()) {
       const sender = runtime.pc.addTrack(video, stream);
       runtime.screenSender = sender;
       const transceiver = runtime.pc.getTransceivers().find((t) => t.sender === sender);
       if (transceiver) preferVideoCodec(transceiver, options.codec);
       await tuneSender(sender, options.bitrateMbps * 1_000_000, options.fps);
-      const audio = stream.getAudioTracks()[0];
-      if (audio) {
-        runtime.screenAudioSender = runtime.pc.addTrack(audio, stream);
+      if (systemAudio) {
+        runtime.screenAudioSender = runtime.pc.addTrack(systemAudio, stream);
         await tuneSender(runtime.screenAudioSender, 160_000);
       }
-      void peerId;
     }
     setSharing(true);
     send({ type: 'presence', sharing: true });
@@ -454,7 +536,10 @@ export function useMediaSession(settings: AppSettings | null) {
   }, [connected, sharing]);
 
   useEffect(() => {
-    if (!connected || !micStreamRef.current || !settings?.voiceActivity) return;
+    if (!connected || !micStreamRef.current) {
+      setSelfSpeaking(false);
+      return;
+    }
     const ctx = new AudioContext();
     const analyser = ctx.createAnalyser();
     analyser.fftSize = 512;
@@ -465,16 +550,19 @@ export function useMediaSession(settings: AppSettings | null) {
     vadTimerRef.current = window.setInterval(() => {
       analyser.getByteTimeDomainData(data);
       let sum = 0;
-      for (const v of data) { const x = (v - 128) / 128; sum += x * x; }
+      for (const value of data) { const normalized = (value - 128) / 128; sum += normalized * normalized; }
       const rms = Math.sqrt(sum / data.length);
-      const speakingNow = rms > 0.035 && !mutedRef.current;
+      const micEnabled = micStreamRef.current?.getAudioTracks().some((track) => track.enabled && track.readyState === 'live') ?? false;
+      const speakingNow = rms > 0.035 && !mutedRef.current && micEnabled;
       if (speakingNow !== lastSpeaking) {
         lastSpeaking = speakingNow;
-        send({ type: 'presence', speaking: speakingNow });
+        setSelfSpeaking(speakingNow);
+        if (settings?.voiceActivity !== false) send({ type: 'presence', speaking: speakingNow });
       }
     }, 150);
     return () => {
       if (vadTimerRef.current) window.clearInterval(vadTimerRef.current);
+      setSelfSpeaking(false);
       source.disconnect();
       void ctx.close();
     };
@@ -514,7 +602,9 @@ export function useMediaSession(settings: AppSettings | null) {
   useEffect(() => () => disconnect(), [disconnect]);
 
   return {
-    participants, connected, connecting, roomName, error, muted, deafened, sharing, shareStats, supportedCodecs,
-    connect, disconnect, setMuted, toggleDeaf, startShare, stopShare, setParticipantVolume
+    participants, connected, connecting, roomName, error, muted, deafened, sharing, selfSpeaking, selfId,
+    localScreenStream, chatMessages, shareStats, supportedCodecs,
+    connect, disconnect, setMuted, toggleDeaf, startShare, stopShare, setParticipantVolume,
+    setParticipantStreamVolume, toggleParticipantStreamMute, sendChat
   };
 }
