@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { decodeInvite, encodeInvite } from '@shared/invite';
 import type { AppSettings, DiscoveredRoom, HostedRoom, NetworkInfo } from '@shared/types';
 import { useMediaSession } from '@renderer/hooks/useMediaSession';
-import { RemoteAudio, RemoteVideo } from '@renderer/components/MediaElements';
+import { RemoteAudio } from '@renderer/components/MediaElements';
+import { FocusedStreams } from '@renderer/components/FocusedStreams';
 import { ScreenShareModal } from '@renderer/components/ScreenShareModal';
 import { SettingsModal } from '@renderer/components/SettingsModal';
 
@@ -139,24 +140,16 @@ export default function App() {
           <div className="status-card"><small>ENCODER / GPU</small><strong>{gpuEncode}</strong><span>AV1 → H.264 com aceleração do Chromium quando disponível</span></div>
         </div>
       </section> : <section className="call-stage">
-        <div className="stage-content">
-          {streamCount > 0 ? <div className="streams-grid">
-            {media.sharing && media.localScreenStream && <article className="stream-card self-stream-card">
-              <div className="stream-header"><div><strong>Você está transmitindo</strong><small>Preview local</small></div><span className="live-badge self-badge">SUA STREAM</span></div>
-              <div className="stream-video-wrap"><RemoteVideo stream={media.localScreenStream} /></div>
-              <div className="stream-footer"><span>🔇 O áudio da sua própria stream não é reproduzido aqui para evitar eco.</span></div>
-            </article>}
-            {remoteStreams.map((participant) => <article className="stream-card" key={participant.id}>
-              <div className="stream-header"><div><strong>{participant.displayName}</strong><small>Transmitindo agora</small></div><span className="live-badge">AO VIVO</span></div>
-              <div className="stream-video-wrap"><RemoteVideo stream={participant.screenStream} /></div>
-              <div className="stream-footer stream-audio-control">
-                <button className={`stream-audio-button ${participant.streamMuted ? 'muted' : ''}`} title={participant.streamMuted ? 'Ativar áudio desta stream' : 'Silenciar esta stream'} onClick={() => media.toggleParticipantStreamMute(participant.id)}>{participant.streamMuted ? '🔇' : '🔊'}</button>
-                <input aria-label={`Volume da stream de ${participant.displayName}`} type="range" min="0" max="1" step="0.05" value={participant.streamVolume} onChange={(event) => media.setParticipantStreamVolume(participant.id, Number(event.target.value))} />
-                <b>{Math.round(participant.streamVolume * 100)}%</b>
-              </div>
-              <RemoteAudio stream={participant.screenStream} volume={participant.streamVolume} muted={media.deafened || participant.streamMuted} outputDeviceId={settings.outputDeviceId} />
-            </article>)}
-          </div> : <div className="call-placeholder"><div className={`avatar huge ${media.selfSpeaking ? 'speaking' : ''}`}>{settings.displayName.slice(0, 1).toUpperCase()}</div><h2>Chamada conectada</h2><p>Inicie uma transmissão de tela ou continue na chamada de voz. Quando houver várias streams, elas aparecerão juntas aqui.</p></div>}
+        <div className="stage-content discord-stage-content">
+          {streamCount > 0 ? <FocusedStreams
+            remoteStreams={remoteStreams}
+            localScreenStream={media.localScreenStream}
+            localSharing={media.sharing}
+            deafened={media.deafened}
+            outputDeviceId={settings.outputDeviceId}
+            setParticipantStreamVolume={media.setParticipantStreamVolume}
+            toggleParticipantStreamMute={media.toggleParticipantStreamMute}
+          /> : <div className="call-placeholder"><div className={`avatar huge ${media.selfSpeaking ? 'speaking' : ''}`}>{settings.displayName.slice(0, 1).toUpperCase()}</div><h2>Chamada conectada</h2><p>Inicie uma transmissão de tela ou continue na chamada de voz. Quando houver várias streams, você escolhe qual fica em destaque.</p></div>}
 
           {media.sharing && <div className="stats-panel"><div className="stats-title">Qualidade entregue</div>{Object.entries(media.shareStats).length === 0 ? <small>Aguardando estatísticas dos peers…</small> : Object.entries(media.shareStats).map(([peerId, stats]) => <div className="stats-row" key={peerId}>
             <span>{media.participants.find((p) => p.id === peerId)?.displayName ?? peerId.slice(0, 6)}</span>
