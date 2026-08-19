@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.1 - 2026-08-18
+
+### Alterado
+- Multistream redesenhado para usar uma transmissão principal em destaque em vez de uma grade com todos os vídeos do mesmo tamanho.
+- As outras transmissões agora aparecem em uma faixa horizontal de miniaturas e podem ser trazidas para o foco com um clique.
+- Adicionado controle para fixar a transmissão atual no foco e impedir que uma nova stream roube o destaque automaticamente.
+- Quando o foco não está fixado, uma nova transmissão pode assumir o destaque automaticamente.
+- A própria transmissão continua disponível como preview local, mas de forma mais discreta quando não está em foco.
+- Controles de volume e mute da transmissão em foco permanecem independentes do volume do microfone do participante.
+- O áudio remoto de cada stream é reproduzido apenas uma vez, independentemente de a stream estar no foco ou na faixa de miniaturas.
+
 ## 0.2.0 - 2026-08-18
 
 ### Adicionado
