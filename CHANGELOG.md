@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.2.0 - 2026-08-18
+
+### Adicionado
+- Chat de texto em tempo real dentro da sala, com até 100 mensagens mantidas somente em memória enquanto o host estiver ativo.
+- Grade para visualizar várias transmissões simultaneamente.
+- Preview local da própria transmissão, sem reproduzir o próprio áudio para evitar eco.
+- Volume e mute independentes para o áudio de cada transmissão assistida, separados do volume do microfone do participante.
+- Indicador verde no avatar do próprio usuário quando o microfone detectar voz.
+
+### Corrigido
+- Separação determinística entre a faixa de áudio do microfone e a faixa de áudio da transmissão no receptor WebRTC.
+- Corrigido o caso em que o áudio da stream podia ser classificado como microfone dependendo da ordem em que as tracks chegavam, afetando especialmente a transmissão do host.
+- O cliente agora preserva campos de presença quando recebe atualizações parciais.
+- A interface avisa explicitamente quando o Windows inicia uma captura solicitada com áudio, mas não entrega a faixa de loopback.
+
 ## 0.1.2 - 2026-08-18
 
 ### Corrigido
