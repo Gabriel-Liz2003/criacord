@@ -2,63 +2,140 @@
 
 ## Decisão de stack
 
-A V1 usa Electron + React/TypeScript em vez de Tauri. O motivo é o requisito Windows de captura de tela/janela e áudio de sistema com configuração zero. Electron expõe `desktopCapturer` e `setDisplayMediaRequestHandler`, enquanto o Chromium fornece WebRTC, Opus, codecs de vídeo e aceleração por hardware quando disponível.
+A partir da 0.3, o CriaCord usa **Tauri 2 + Rust + React/TypeScript + WebView2** no Windows. A UI e a maior parte da lógica WebRTC existente foram preservadas; os elementos específicos do Electron foram substituídos por comandos Rust mínimos.
 
-## Processos
+A migração evita empacotar Chromium/Node com o aplicativo e remove o servidor doméstico, descoberta Radmin/LAN, firewall elevado e helper PTT externo.
 
-### Main process
+## Camadas
 
-Responsável por recursos privilegiados:
+### Tauri / Rust
 
-- criação da janela;
-- enumeração de monitores/janelas;
-- seleção segura da fonte de `getDisplayMedia`;
-- loopback de áudio do Windows;
-- servidor WebSocket local de signaling;
-- descoberta UDP;
-- detecção Radmin/LAN;
-- persistência de configurações;
-- firewall e informações de GPU;
-- helper nativo Windows para PTT global enquanto o jogo está em foco.
+Responsável apenas pelo que precisa de integração desktop:
 
-### Renderer
+- janela nativa;
+- persistência de `settings.json` no diretório de dados do app;
+- PTT global no Windows via `GetAsyncKeyState`;
+- versão do app e metadados desktop;
+- empacotamento NSIS/current-user.
 
-Responsável por UI e mídia WebRTC:
+Não hospeda sala, não abre porta de entrada, não altera firewall e não solicita UAC no fluxo normal.
 
-- microfone com constraints de voz;
-- mesh `RTCPeerConnection`;
-- perfect negotiation para reduzir glare;
-- PTT/mute/deaf/VAD;
-- captura de tela;
-- seleção/preferência de codec;
-- limites de bitrate/fps;
-- coleta de `getStats()`;
-- DataChannel de controle para devolver estatísticas do receptor.
+### WebView2 / React
 
-## Protocolo de signaling
+Responsável por:
 
-Mensagens JSON pequenas:
+- UI de sala/call/chat/multistream;
+- microfone (`getUserMedia`);
+- seletor de compartilhamento (`getDisplayMedia`);
+- WebRTC mesh;
+- ICE/STUN/TURN;
+- perfect negotiation;
+- VAD/mute/deafen/PTT;
+- preferência AV1/H.264;
+- bitrate/FPS e adaptação;
+- `getStats()` e diagnóstico;
+- preview e volumes individuais de streams.
 
-- `auth-challenge`
-- `join` (prova HMAC opcional; nunca senha em texto puro)
-- `welcome`
-- `peer-joined`
-- `peer-left`
-- `signal` (`offer`, `answer`, `ice`)
-- `presence`
-- `ping` / `pong`
-- `error`
+## Conectividade
 
-O servidor apenas encaminha signaling. A mídia não atravessa o servidor.
+### Signaling
 
-## Convite
+O signaling é um relay WebSocket externo e mínimo. Ele não precisa conhecer topologia de mídia nem transportar áudio/vídeo.
 
-Formato `CC1-<base64url(JSON)>` contendo versão, host, porta e código da sala. Senhas não são colocadas no convite. Em salas protegidas, cada conexão recebe nonce + salt; o cliente deriva PBKDF2-SHA-256 e envia somente uma prova HMAC-SHA-256 vinculada ao nonce.
+Envelope:
 
-## Descoberta
+```ts
+interface RouterEnvelope {
+  v: 2;
+  from: string;
+  displayName: string;
+  to?: string;
+  sentAt: number;
+  message: WireMessage;
+}
+```
 
-O host anuncia a sala a cada 2 s por UDP na porta 43188 para broadcasts das interfaces detectadas. O cliente expira anúncios após 7 s. Radmin recebe prioridade na escolha de endereço.
+Mensagens usadas:
 
-## Evolução para SFU
+- `hello` / `hello-ack`: descoberta de peers no canal da sala;
+- `signal`: offer/answer/ICE direcionados;
+- `presence`: speaking/sharing/mute/deafen;
+- `chat` / `chat-sync`: chat da sessão;
+- `bye`;
+- `ping`.
 
-A UI não assume que o signaling também transporte mídia. Para uma V2 com SFU, mantenha os contratos de `Participant`, `StreamStats` e controles, substituindo a criação do mesh por um adaptador de transporte SFU.
+O repositório fornece `signaling/server.mjs`, que simplesmente retransmite bytes aos outros sockets do mesmo canal. Não existe persistência.
+
+### ICE/STUN/TURN
+
+Cada `RTCPeerConnection` recebe servidores STUN. O navegador coleta candidates e tenta caminho UDP direto.
+
+Quando configurado no build, TURN é adicionado como segundo caminho:
+
+```text
+A <──────────── UDP / WebRTC direto ────────────> B
+ \                                                /
+  └────────────── TURN somente fallback ─────────┘
+```
+
+Configuração de build:
+
+- `VITE_TURN_URL`
+- `VITE_TURN_USERNAME`
+- `VITE_TURN_CREDENTIAL`
+
+O usuário final não configura nada disso.
+
+### Recuperação
+
+- `iceConnectionState=disconnected` por alguns segundos -> `restartIce()`;
+- `iceConnectionState=failed` -> `restartIce()` imediato;
+- `connectionState=failed` -> tentativa de ICE restart;
+- signaling WSS reconecta com backoff sem destruir automaticamente PeerConnections já saudáveis;
+- fim inesperado da track de compartilhamento remove a stream da UI;
+- track local perdida encerra o compartilhamento de forma limpa;
+- perda/limitação de banda reduz bitrate do sender gradualmente.
+
+## Salas e convites
+
+A 0.3 usa códigos aleatórios de 12 caracteres e convite `CC2-<base64url(JSON)>`. O convite não carrega IP nem porta.
+
+Sala sem senha usa canal derivado do código. Sala com senha deriva um sufixo SHA-256 de `roomCode:password`, de forma que uma senha errada leva a outro canal em vez de expor a senha ao signaling.
+
+Isso não substitui autenticação forte para cenários hostis; o projeto é direcionado a pequenos grupos de amigos. Para exposição pública, recomenda-se adicionar autenticação/token de sala no signaling próprio.
+
+## Mídia
+
+### Voz
+
+O microfone é capturado uma vez e adicionado a cada PeerConnection. A identificação remota mantém streams separadas para microfone e compartilhamento. VAD usa análise RMS local e envia apenas estado speaking, nunca amostras de áudio para o signaling.
+
+### Tela e áudio de sistema
+
+`getDisplayMedia` abre o seletor de captura fornecido pelo WebView2/Windows. O CriaCord solicita vídeo na resolução/FPS desejados e áudio de sistema quando habilitado. Se o runtime não fornecer uma track de áudio, o app informa explicitamente a limitação.
+
+### Codecs e bitrate
+
+- preferência: AV1 quando suportado e negociável;
+- fallback: H.264;
+- `RTCRtpSender.setParameters` define teto de bitrate/FPS;
+- stats por peer permitem reduzir bitrate quando a rede não sustenta o perfil solicitado.
+
+A aceleração concreta depende do WebView2, driver e GPU. O CriaCord não afirma AMF/NVENC/QSV ativo sem confirmação de stats/runtime.
+
+## Multistream
+
+O transporte continua mesh: cada transmissor envia uma track de tela para cada peer. A UI possui foco principal, filmstrip, preview próprio e volume independente por stream.
+
+Para grupos maiores, a evolução recomendada continua sendo um SFU. A separação entre UI, signaling e transporte de mídia permite trocar o mesh posteriormente sem reescrever toda a interface.
+
+## Segurança
+
+- WebRTC usa DTLS-SRTP;
+- signaling deve usar WSS em produção;
+- mensagens são limitadas e validadas antes de serem aplicadas;
+- conteúdo de mídia não é persistido;
+- nenhum serviço de analytics/telemetria é incluído por padrão;
+- PTT global consulta apenas o estado da tecla configurada.
+
+WebRTC não fornece anonimato entre peers. ICE candidates e serviços TURN podem revelar informações de rede necessárias ao transporte. Veja `PRIVACY.md`.

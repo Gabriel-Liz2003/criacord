@@ -11,35 +11,52 @@ permissions:
 jobs:
   validate:
     runs-on: windows-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
       - name: Install dependencies
         run: npm install --no-audit --no-fund
-      - name: Typecheck
+      - name: Install signaling dependencies
+        run: npm install --prefix signaling --no-audit --no-fund
+      - name: Typecheck renderer
         run: npm run typecheck
-      - name: Unit and integration tests
+      - name: Unit tests
         run: npm test
-      - name: Build renderer and Electron main
+      - name: Signaling relay integration test
+        run: npm test --prefix signaling
+      - name: Rust tests
+        working-directory: src-tauri
+        run: cargo test
+      - name: Build renderer
         run: npm run build
-      - name: Build global PTT helper
-        run: npm run build:ptt
-      - name: Build Windows executables
-        run: npx electron-builder --win --x64 --publish never
-      - name: Smoke-test packaged executable
+      - name: Build Tauri Windows app
+        run: npx tauri build
+      - name: Smoke-test and validate lightweight executable
         shell: pwsh
         run: |
-          $exe = Get-ChildItem -Path release -Recurse -Filter CriaCord.exe | Select-Object -First 1
-          if (-not $exe) { throw 'win-unpacked/CriaCord.exe not found' }
-          $process = Start-Process -FilePath $exe.FullName -ArgumentList '--smoke-test' -Wait -PassThru -NoNewWindow
+          $exe = 'src-tauri/target/release/criacord.exe'
+          if (-not (Test-Path $exe)) { throw 'Tauri release executable not found' }
+          $size = (Get-Item $exe).Length
+          Write-Host "Raw CriaCord.exe size: $([math]::Round($size / 1MB, 2)) MB"
+          if ($size -gt 40MB) { throw 'Raw Tauri executable unexpectedly exceeds 40 MB' }
+          $sw = [Diagnostics.Stopwatch]::StartNew()
+          $process = Start-Process -FilePath $exe -ArgumentList '--smoke-test' -PassThru -Wait -NoNewWindow
+          $sw.Stop()
           if ($process.ExitCode -ne 0) { throw "CriaCord smoke-test failed with $($process.ExitCode)" }
+          Write-Host "Tauri smoke-test startup/exit: $([math]::Round($sw.Elapsed.TotalMilliseconds)) ms"
       - name: Upload Windows build
         uses: actions/upload-artifact@v4
         with:
-          name: CriaCord-Windows
+          name: CriaCord-Windows-Tauri
           path: |
-            release/*.exe
+            src-tauri/target/release/criacord.exe
+            src-tauri/target/release/bundle/nsis/*.exe
           if-no-files-found: error

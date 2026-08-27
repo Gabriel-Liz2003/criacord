@@ -1,0 +1,21 @@
+[package]
+name = "criacord"
+version = "0.3.0"
+description = "Private P2P voice and screen sharing"
+authors = ["CriaCord"]
+edition = "2021"
+
+[lib]
+name = "criacord_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_UI_Input_KeyboardAndMouse"] }

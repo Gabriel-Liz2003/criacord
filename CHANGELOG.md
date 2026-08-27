@@ -1,5 +1,47 @@
 # Changelog
 
+## 0.3.0 - 2026-08-27
+
+### Mudanças estruturais
+- Desktop migrado de Electron/Chromium empacotado para Tauri 2 + Rust + WebView2.
+- Removidos Electron main/preload, `electron-builder`, servidor de sala local, descoberta UDP/Radmin, configuração elevada de firewall e helper PTT `.exe` separado.
+- PTT global Windows integrado ao backend Rust sem UAC.
+- Configurações locais migradas para o backend Tauri.
+
+### Rede
+- Radmin, Hamachi, ZeroTier e IP manual deixam de fazer parte do fluxo da aplicação.
+- Salas agora usam códigos aleatórios curtos e convites `CC2` que não contêm IP/porta.
+- Adicionado signaling remoto WSS, substituível no build, usado somente para negociação/controle.
+- Adicionado servidor de signaling próprio stateless em `signaling/` com teste de relay entre dois clientes.
+- `RTCPeerConnection` agora usa ICE/STUN público e suporte opcional a TURN como fallback.
+- Adicionados ICE restart automático em `disconnected/failed` e reconexão do signaling com backoff.
+
+### Streaming e áudio
+- Captura migrou de `desktopCapturer` do Electron para `getDisplayMedia` pelo WebView2/Windows.
+- Adicionado preset 1440p30, mantendo 720p30/60, 1080p30/60 e 1440p60.
+- Mantidas preferências AV1/H.264, tuning de sender, multistream, preview próprio e volume independente por stream.
+- Adicionado watchdog de track de compartilhamento.
+- Adicionada redução automática de bitrate quando stats indicarem limitação por banda/perda elevada.
+- O app avisa quando a fonte escolhida não fornece áudio de sistema.
+
+### Segurança e privacidade
+- Mantida mídia WebRTC DTLS-SRTP.
+- Signaling não transporta áudio/vídeo.
+- Mensagens de signaling/chat recebem limites e validações básicas.
+- Documentado explicitamente que WebRTC P2P não oferece anonimato entre peers e que ICE/STUN/TURN envolvem metadados de rede.
+- Nenhuma telemetria, tracking, anúncio ou gravação automática foi adicionada.
+
+### Build e testes
+- CI Windows migrado para Node + Rust/Tauri.
+- Adicionados typecheck, testes JS, teste de signaling real, `cargo test`, build Tauri, smoke-test do executável e limite automático de tamanho.
+- Release workflow passa a gerar executável Tauri portátil e instalador NSIS current-user.
+
+### Limitações em validação
+- Áudio de sistema via WebView2 precisa de validação em Windows físico para diferentes fontes.
+- Cenários de CGNAT/NAT simétrico exigem uma build com TURN válido configurado.
+- 1440p60, escolha efetiva de encoder de hardware, RAM/CPU/GPU e duas redes residenciais diferentes continuam dependendo de testes físicos.
+- Assinatura de código Windows continua separada desta migração.
+
 ## 0.2.1 - 2026-08-18
 
 ### Alterado

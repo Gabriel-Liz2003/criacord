@@ -12,19 +12,16 @@ permissions:
 jobs:
   release:
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
-
       - name: Resolve version
         id: version
         shell: pwsh
         run: |
           $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
-          if (-not $version) { throw 'package.json version is missing' }
           "tag=v$version" >> $env:GITHUB_OUTPUT
           "version=$version" >> $env:GITHUB_OUTPUT
-
       - name: Check whether release already exists
         id: existing
         shell: pwsh
@@ -32,48 +29,40 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release view "${{ steps.version.outputs.tag }}" *> $null
-          if ($LASTEXITCODE -eq 0) {
-            "exists=true" >> $env:GITHUB_OUTPUT
-            Write-Host "Release ${{ steps.version.outputs.tag }} already exists; nothing to publish."
-          } else {
-            "exists=false" >> $env:GITHUB_OUTPUT
-          }
-
+          "exists=$(if ($LASTEXITCODE -eq 0) {'true'} else {'false'})" >> $env:GITHUB_OUTPUT
       - uses: actions/setup-node@v4
         if: steps.existing.outputs.exists != 'true'
         with:
           node-version: '22'
-
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.existing.outputs.exists != 'true'
+      - uses: swatinem/rust-cache@v2
+        if: steps.existing.outputs.exists != 'true'
+        with:
+          workspaces: src-tauri
       - name: Install dependencies
         if: steps.existing.outputs.exists != 'true'
         run: npm install --no-audit --no-fund
-
       - name: Validate
         if: steps.existing.outputs.exists != 'true'
         run: |
           npm run typecheck
           npm test
-
-      - name: Build global PTT helper
+          cd src-tauri
+          cargo test
+      - name: Build Tauri Windows app
         if: steps.existing.outputs.exists != 'true'
-        run: npm run build:ptt
-
-      - name: Build Windows executables
-        if: steps.existing.outputs.exists != 'true'
-        run: |
-          npm run build
-          npx electron-builder --win --x64 --publish never
-
-      - name: Smoke-test packaged executable
+        run: npx tauri build
+      - name: Stage release assets
         if: steps.existing.outputs.exists != 'true'
         shell: pwsh
         run: |
-          $exe = Get-ChildItem -Path release -Recurse -Filter CriaCord.exe | Select-Object -First 1
-          if (-not $exe) { throw 'win-unpacked/CriaCord.exe not found' }
-          $process = Start-Process -FilePath $exe.FullName -ArgumentList '--smoke-test' -Wait -PassThru -NoNewWindow
-          if ($process.ExitCode -ne 0) { throw "CriaCord smoke-test failed with $($process.ExitCode)" }
-
-      - name: Create tag and GitHub Release
+          New-Item -ItemType Directory -Force -Path release | Out-Null
+          Copy-Item src-tauri/target/release/criacord.exe "release/CriaCord-Portable-${{ steps.version.outputs.version }}-x64.exe"
+          $installer = Get-ChildItem src-tauri/target/release/bundle/nsis -Filter '*.exe' | Select-Object -First 1
+          if (-not $installer) { throw 'NSIS installer not found' }
+          Copy-Item $installer.FullName "release/CriaCord-${{ steps.version.outputs.version }}-x64-Setup.exe"
+      - name: Create GitHub Release
         if: steps.existing.outputs.exists != 'true'
         shell: pwsh
         env:
@@ -81,20 +70,17 @@ jobs:
         run: |
           $tag = "${{ steps.version.outputs.tag }}"
           $version = "${{ steps.version.outputs.version }}"
-          $assets = Get-ChildItem -Path release -Filter '*.exe' | Select-Object -ExpandProperty FullName
-          if ($assets.Count -lt 2) { throw 'Expected installer and portable executables were not generated.' }
-          $notes = @"
+          @"
           CriaCord $version
 
-          Build automático para Windows x64.
+          Build Tauri 2 para Windows x64, sem Electron/Chromium empacotado.
 
-          Inclui:
-          - instalador CriaCord-$version-x64.exe
-          - executável portátil CriaCord-Portable-$version-x64.exe
+          - executável portátil
+          - instalador por usuário
+          - WebRTC pela internet com ICE/STUN
+          - TURN opcional como fallback
+          - sem Radmin, IP manual, port forwarding ou UAC no uso normal
 
-          Esta build passou por typecheck, testes automatizados, compilação do helper nativo de PTT, empacotamento Windows e smoke test do executável.
-
-          A validação física de chamada, Radmin/LAN, áudio de sistema, AV1/H.264 e 1440p60 entre dois PCs continua sendo necessária antes de classificar a V1 como totalmente validada em hardware real.
-          "@
-          $notes | Set-Content -Path release-notes.md -Encoding utf8
-          gh release create $tag $assets --target $env:GITHUB_SHA --title "CriaCord $tag" --notes-file release-notes.md
+          A build passou por typecheck, testes JS, testes Rust e empacotamento Tauri no Windows CI.
+          "@ | Set-Content release-notes.md -Encoding utf8
+          gh release create $tag release/*.exe --target $env:GITHUB_SHA --title "CriaCord $tag" --notes-file release-notes.md

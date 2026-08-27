@@ -1,6 +1,7 @@
 import type { InvitePayload } from './types.js';
 
-const PREFIX = 'CC1-';
+const PREFIX = 'CC2-';
+const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
 function toBase64Url(text: string): string {
   const bytes = new TextEncoder().encode(text);
@@ -17,6 +18,15 @@ function fromBase64Url(value: string): string {
   return new TextDecoder().decode(bytes);
 }
 
+export function createRoomCode(length = 12): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(length));
+  return Array.from(bytes, (value) => ALPHABET[value % ALPHABET.length]).join('');
+}
+
+export function normalizeRoomCode(value: string): string {
+  return value.trim().toUpperCase().replace(/[^A-Z2-9]/g, '');
+}
+
 export function encodeInvite(payload: InvitePayload): string {
   return PREFIX + toBase64Url(JSON.stringify(payload));
 }
@@ -29,11 +39,8 @@ export function decodeInvite(code: string): InvitePayload {
   catch { throw new Error('Código de convite corrompido.'); }
   if (!parsed || typeof parsed !== 'object') throw new Error('Convite inválido.');
   const p = parsed as Partial<InvitePayload>;
-  if (p.v !== 1 || typeof p.host !== 'string' || typeof p.port !== 'number' || typeof p.room !== 'string') {
-    throw new Error('Convite incompatível.');
-  }
-  if (p.port < 1 || p.port > 65535 || p.host.length > 255 || p.room.length < 4 || p.room.length > 32) {
-    throw new Error('Convite inválido.');
-  }
-  return p as InvitePayload;
+  if (p.v !== 2 || typeof p.room !== 'string') throw new Error('Convite incompatível.');
+  const room = normalizeRoomCode(p.room);
+  if (room.length < 8 || room.length > 32) throw new Error('Convite inválido.');
+  return { v: 2, room, roomName: typeof p.roomName === 'string' ? p.roomName.slice(0, 80) : undefined, hasPassword: Boolean(p.hasPassword) };
 }

@@ -1,0 +1,13 @@
+{
+  "name": "criacord-signaling",
+  "private": true,
+  "version": "0.3.0",
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node test.mjs"
+  },
+  "dependencies": {
+    "ws": "^8.18.3"
+  }
+}
