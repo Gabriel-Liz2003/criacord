@@ -1,0 +1,85 @@
+name: Bootstrap local Tauri patches
+
+on:
+  push:
+    branches: [agent/complete-tauri-p2p]
+
+permissions:
+  contents: write
+
+jobs:
+  apply-build:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Decode exact local patches
+        shell: bash
+        run: |
+          base64 -d .bootstrap/p1.patch.gz.b64 | gzip -dc > "$RUNNER_TEMP/p1.patch"
+          base64 -d .bootstrap/p2.patch.gz.b64 | gzip -dc > "$RUNNER_TEMP/p2.patch"
+      - name: Apply patches as the original two commits
+        shell: bash
+        run: |
+          git config user.name "Codex"
+          git config user.email "codex@openai.com"
+          git checkout -B finalized 6ede15e49b67b86c4325ab9e9dc30db23a4e483e
+          git apply --check "$RUNNER_TEMP/p1.patch"
+          git apply "$RUNNER_TEMP/p1.patch"
+          git add -A
+          git commit -m "feat: harden Tauri internet P2P migration"
+          git apply --check "$RUNNER_TEMP/p2.patch"
+          git apply "$RUNNER_TEMP/p2.patch"
+          git add -A
+          git commit -m "docs: record release validation and deployment guidance"
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Install signaling dependencies
+        run: npm ci --prefix signaling --no-audit --no-fund
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Unit tests
+        run: npm test
+      - name: Signaling integration test
+        run: npm test --prefix signaling
+      - name: Lint
+        run: npm run lint
+      - name: Build web
+        run: npm run build:web
+      - name: Rust format check
+        working-directory: src-tauri
+        run: cargo fmt --check
+      - name: Rust tests
+        working-directory: src-tauri
+        run: cargo test --locked
+      - name: Build Tauri Windows app
+        run: npx tauri build
+      - name: Smoke test and size report
+        shell: pwsh
+        run: |
+          $exe = 'src-tauri/target/release/criacord.exe'
+          if (-not (Test-Path $exe)) { throw 'CriaCord.exe not found' }
+          $size = (Get-Item $exe).Length
+          Write-Host "Raw CriaCord.exe size: $([math]::Round($size / 1MB, 2)) MB"
+          & $exe --smoke-test
+          if ($LASTEXITCODE -ne 0) { throw "Smoke test failed: $LASTEXITCODE" }
+      - name: Upload Windows build
+        uses: actions/upload-artifact@v4
+        with:
+          name: CriaCord-Windows-Tauri-0.3.0
+          path: |
+            src-tauri/target/release/criacord.exe
+            src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: error
+      - name: Publish finalized branch
+        shell: bash
+        run: git push --force origin HEAD:agent/complete-tauri-p2p
