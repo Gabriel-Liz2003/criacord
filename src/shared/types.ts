@@ -13,52 +13,18 @@ export interface AppSettings {
   micBitrateKbps: number;
 }
 
-export interface NetworkInterfaceInfo {
-  name: string;
-  address: string;
-  netmask: string;
-  cidr?: string;
-  isRadmin: boolean;
-  score: number;
-}
-
-export interface NetworkInfo {
-  interfaces: NetworkInterfaceInfo[];
-  preferred?: NetworkInterfaceInfo;
-  radminDetected: boolean;
-}
-
-export interface DesktopSourceInfo {
-  id: string;
-  name: string;
-  thumbnailDataUrl: string;
-  appIconDataUrl?: string;
-  kind: 'screen' | 'window';
-}
-
-export interface HostedRoom {
+export interface RoomEndpoint {
   roomCode: string;
-  roomName: string;
-  inviteCode: string;
-  hostAddress: string;
-  port: number;
-  hasPassword: boolean;
-}
-
-export interface DiscoveredRoom {
-  roomCode: string;
-  roomName: string;
-  hostAddress: string;
-  port: number;
-  hasPassword: boolean;
-  lastSeen: number;
+  roomName?: string;
+  password?: string;
+  isHost?: boolean;
 }
 
 export interface InvitePayload {
-  v: 1;
-  host: string;
-  port: number;
+  v: 2;
   room: string;
+  roomName?: string;
+  hasPassword?: boolean;
 }
 
 export interface ChatMessage {
@@ -72,17 +38,23 @@ export interface ChatMessage {
 export type SignalPayload = RTCSessionDescriptionInit | RTCIceCandidateInit;
 
 export type WireMessage =
-  | { type: 'auth-challenge'; required: boolean; salt?: string; nonce: string; iterations: number }
-  | { type: 'join'; roomCode: string; displayName: string; clientId: string; passwordProof?: string }
-  | { type: 'welcome'; selfId: string; roomName: string; peers: Array<{ id: string; displayName: string }>; chatHistory?: ChatMessage[] }
-  | { type: 'peer-joined'; peer: { id: string; displayName: string } }
-  | { type: 'peer-left'; peerId: string }
-  | { type: 'signal'; from?: string; to: string; signalType: 'offer' | 'answer' | 'ice'; payload: SignalPayload }
-  | { type: 'presence'; from?: string; to?: string; speaking?: boolean; sharing?: boolean; muted?: boolean; deafened?: boolean }
-  | { type: 'chat'; text: string; from?: string; displayName?: string; timestamp?: number; id?: string }
-  | { type: 'error'; code: string; message: string }
-  | { type: 'ping'; t: number }
-  | { type: 'pong'; t: number };
+  | { type: 'hello'; roomName?: string }
+  | { type: 'hello-ack'; roomName?: string }
+  | { type: 'bye' }
+  | { type: 'signal'; to: string; signalType: 'offer' | 'answer' | 'ice'; payload: SignalPayload }
+  | { type: 'presence'; to?: string; speaking?: boolean; sharing?: boolean; muted?: boolean; deafened?: boolean }
+  | { type: 'chat'; text: string; displayName?: string; timestamp?: number; id?: string }
+  | { type: 'chat-sync'; messages: ChatMessage[] }
+  | { type: 'ping'; t: number };
+
+export interface RouterEnvelope {
+  v: 2;
+  from: string;
+  displayName: string;
+  to?: string;
+  sentAt: number;
+  message: WireMessage;
+}
 
 export interface Participant {
   id: string;
@@ -121,18 +93,9 @@ export interface StreamStats {
   timestamp: number;
 }
 
-export interface ElectronAPI {
+export interface DesktopAPI {
   getSettings(): Promise<AppSettings>;
   saveSettings(settings: Partial<AppSettings>): Promise<AppSettings>;
-  getNetworkInfo(): Promise<NetworkInfo>;
-  listDesktopSources(): Promise<DesktopSourceInfo[]>;
-  selectDesktopSource(sourceId: string | null): Promise<void>;
-  hostRoom(input: { roomName: string; password?: string }): Promise<HostedRoom>;
-  stopHosting(): Promise<void>;
-  startDiscovery(): Promise<DiscoveredRoom[]>;
-  stopDiscovery(): Promise<void>;
-  onDiscoveredRooms(callback: (rooms: DiscoveredRoom[]) => void): () => void;
-  ensureFirewallRule(): Promise<{ ok: boolean; message: string }>;
   copyText(text: string): Promise<void>;
   getGPUInfo(): Promise<{ featureStatus: Record<string, string>; basicInfo: unknown; supportedVideoCodecs: string[] }>;
   configurePushToTalk(enabled: boolean, key: string): Promise<{ ok: boolean; global: boolean; message: string }>;
@@ -142,6 +105,6 @@ export interface ElectronAPI {
 
 declare global {
   interface Window {
-    criacord: ElectronAPI;
+    criacord: DesktopAPI;
   }
 }
