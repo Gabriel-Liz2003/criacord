@@ -1,16 +1,14 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { SHARE_PRESETS } from '@shared/constants';
-import type { CodecPreference, DesktopSourceInfo } from '@shared/types';
+import type { CodecPreference } from '@shared/types';
 
 interface Props {
   codecs: string[];
   onClose: () => void;
-  onStart: (options: { sourceId: string; width: number; height: number; fps: number; bitrateMbps: number; codec: CodecPreference; audio: boolean }) => Promise<void>;
+  onStart: (options: { width: number; height: number; fps: number; bitrateMbps: number; codec: CodecPreference; audio: boolean }) => Promise<void>;
 }
 
 export function ScreenShareModal({ codecs, onClose, onStart }: Props) {
-  const [sources, setSources] = useState<DesktopSourceInfo[]>([]);
-  const [sourceId, setSourceId] = useState('');
   const [preset, setPreset] = useState('1440p60');
   const [bitrate, setBitrate] = useState(24);
   const [customWidth, setCustomWidth] = useState(2560);
@@ -22,39 +20,21 @@ export function ScreenShareModal({ codecs, onClose, onStart }: Props) {
   const [error, setError] = useState('');
   const selectedPreset = useMemo(() => preset === 'custom'
     ? { label: 'Personalizado', width: customWidth, height: customHeight, fps: customFps, bitrateMbps: bitrate }
-    : (SHARE_PRESETS.find((p) => p.label === preset) ?? SHARE_PRESETS[4]), [preset, customWidth, customHeight, customFps, bitrate]);
-
-  useEffect(() => {
-    void window.criacord.listDesktopSources().then((items) => {
-      setSources(items);
-      if (items[0]) setSourceId(items[0].id);
-    }).catch((e) => setError(String(e)));
-  }, []);
-
-  useEffect(() => {
-    if (preset !== 'custom') {
-      const p = SHARE_PRESETS.find((item) => item.label === preset);
-      if (p) setBitrate(p.bitrateMbps);
-    }
-  }, [preset]);
+    : (SHARE_PRESETS.find((p) => p.label === preset) ?? SHARE_PRESETS[5]), [preset, customWidth, customHeight, customFps, bitrate]);
 
   return <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
     <div className="modal share-modal">
       <div className="modal-header">
-        <div><h2>Compartilhar tela</h2><p>Escolha monitor ou janela e a qualidade real desejada.</p></div>
+        <div><h2>Compartilhar tela</h2><p>O seletor seguro do Windows abrirá quando você clicar em transmitir.</p></div>
         <button className="icon-button" onClick={onClose}>×</button>
       </div>
 
-      <div className="sources-grid">
-        {sources.map((source) => <button key={source.id} className={`source-card ${sourceId === source.id ? 'selected' : ''}`} onClick={() => setSourceId(source.id)}>
-          <img src={source.thumbnailDataUrl} alt="" />
-          <span>{source.name}</span>
-          <small>{source.kind === 'screen' ? 'Monitor' : 'Janela / app / jogo'}</small>
-        </button>)}
+      <div className="hint-box">
+        <b>Sem Electron:</b> o CriaCord agora usa o seletor nativo exposto pelo WebView2. Escolha monitor, janela ou aplicativo no diálogo do Windows. Nenhum driver ou permissão de administrador é necessário.
       </div>
 
       <div className="share-settings">
-        <label>Qualidade<select value={preset} onChange={(e) => setPreset(e.target.value)}>{SHARE_PRESETS.map((p) => <option key={p.label}>{p.label}</option>)}<option value="custom">Personalizado</option></select></label>
+        <label>Qualidade<select value={preset} onChange={(e) => { setPreset(e.target.value); const p = SHARE_PRESETS.find((item) => item.label === e.target.value); if (p) setBitrate(p.bitrateMbps); }}>{SHARE_PRESETS.map((p) => <option key={p.label}>{p.label}</option>)}<option value="custom">Personalizado</option></select></label>
         {preset === 'custom' && <div className="custom-resolution">
           <label>Largura<input type="number" min="640" max="7680" step="16" value={customWidth} onChange={(e) => setCustomWidth(Number(e.target.value))} /></label>
           <label>Altura<input type="number" min="360" max="4320" step="16" value={customHeight} onChange={(e) => setCustomHeight(Number(e.target.value))} /></label>
@@ -71,14 +51,14 @@ export function ScreenShareModal({ codecs, onClose, onStart }: Props) {
       {error && <div className="error-banner">{error}</div>}
       <div className="modal-actions">
         <button className="secondary" onClick={onClose}>Cancelar</button>
-        <button className="primary" disabled={!sourceId || busy} onClick={async () => {
+        <button className="primary" disabled={busy} onClick={async () => {
           setBusy(true); setError('');
           try {
-            await onStart({ sourceId, width: selectedPreset.width, height: selectedPreset.height, fps: selectedPreset.fps, bitrateMbps: bitrate, codec, audio });
+            await onStart({ width: selectedPreset.width, height: selectedPreset.height, fps: selectedPreset.fps, bitrateMbps: bitrate, codec, audio });
             onClose();
           } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
           finally { setBusy(false); }
-        }}>{busy ? 'Iniciando…' : `Transmitir ${selectedPreset.label}`}</button>
+        }}>{busy ? 'Abrindo seletor…' : `Transmitir ${selectedPreset.label}`}</button>
       </div>
     </div>
   </div>;
