@@ -1,42 +1,65 @@
 # Plano de testes
 
-## Automatizados
+## Automatizados no CI Windows
 
 | Teste | Cobertura |
 |---|---|
-| `invite.test.ts` | encode/decode e rejeição de convite inválido |
-| `network.test.ts` | cálculo de broadcast LAN/Radmin |
-| `roomServer.test.ts` | challenge-response de senha, rejeição de senha inválida, dois clientes e relay de signaling |
-| `pttKey.test.ts` | mapeamento das teclas PTT para virtual keys do Windows |
-| `npm run typecheck` | renderer, shared, main e preload |
-| `npm run build` | bundle React + compilação Electron |
-| CI Windows | gera instalador NSIS e portátil |
+| `invite.test.ts` | CC2 sem IP/porta, geração/normalização de código e rejeição de convite legado/inválido |
+| `npm run typecheck` | React/shared/Tauri bridge |
+| `npm test` | testes unitários TypeScript |
+| `npm test --prefix signaling` | sobe relay próprio, conecta dois WebSockets e valida encaminhamento real |
+| `cargo test` | backend Rust/Tauri |
+| `npm run build` | bundle React/Vite |
+| `npx tauri build` | executável Release + instalador NSIS Windows |
+| `criacord.exe --smoke-test` | valida que o binário Release inicia e encerra corretamente |
+| limite de tamanho | CI falha se o executável Tauri bruto ultrapassar 40 MB |
 
-## Matriz manual obrigatória antes de considerar a V1 estável
+## Matriz manual obrigatória antes de considerar a 0.3 validada em hardware
 
-1. Windows 11 limpo sem Node/Python/SDK.
-2. Instalar/abrir o `.exe`.
-3. Criar sala no PC A.
-4. Entrar pelo PC B usando Radmin e descoberta automática.
-5. Repetir usando código de convite.
-6. Testar senha correta/incorreta.
-7. Microfone, mute, deaf e volume individual.
-8. Push-to-talk com CriaCord focado e **com um jogo/janela externa em foco** (PTT global).
-9. Voice activity.
-10. Captura de monitor.
-11. Captura de janela/jogo.
-12. Áudio de sistema, verificando que não há áudio duplicado/eco por reprodução dupla.
-13. 1080p60.
-14. 1440p60.
-15. AV1 em par de máquinas compatíveis.
-16. Fallback H.264 em peer sem AV1.
-17. Derrubar signaling por alguns segundos e validar reconexão.
-18. Encerrar host e clientes sem processos órfãos.
-19. Repetir com firewall inicialmente bloqueando a aplicação.
+1. Windows 10/11 limpo, sem Node/Rust/SDK instalado pelo usuário.
+2. Abrir o `.exe` sem executar como administrador e sem UAC do CriaCord.
+3. PC A e PC B em **redes de internet diferentes**.
+4. Criar sala no PC A e copiar somente código/convite.
+5. Entrar no PC B sem Radmin, IP manual ou port forwarding.
+6. Confirmar candidate pair direto em cenário de NAT comum.
+7. Repetir em rede/CGNAT que exija TURN, usando uma build com TURN configurado.
+8. Desconectar/reconectar Wi-Fi ou trocar de rede e observar ICE restart/reconexão.
+9. Derrubar signaling temporariamente durante call já estabelecida e confirmar que mídia P2P existente não cai apenas por isso.
+10. Microfone do criador e convidados.
+11. Mute, deaf, seleção de dispositivos e volumes individuais.
+12. PTT global com jogo/janela externa em foco.
+13. VAD e borda verde local/remota sem piscar excessivamente por ruído ambiente.
+14. Captura de monitor e janela/app pelo seletor do WebView2.
+15. Áudio de sistema do host e convidados.
+16. 720p30/60, 1080p30/60, 1440p30/60.
+17. AV1 quando ambos os peers suportarem.
+18. H.264 como fallback.
+19. Reduzir banda artificialmente e verificar adaptação de bitrate.
+20. Encerrar track de screen share e confirmar remoção/recuperação limpa.
+21. Duas, três e quatro streams simultâneas; foco/miniaturas/preview próprio.
+22. Volume/mute separado de cada stream.
+23. Chat, histórico da sessão, limite de 1000 caracteres e payload inválido.
+24. Encerrar o app e confirmar ausência de processos auxiliares órfãos.
+
+## Diagnóstico esperado
+
+Durante desenvolvimento registrar somente eventos técnicos:
+
+- criação/entrada/saída da sala;
+- peer detectado/removido;
+- estado ICE;
+- estado PeerConnection;
+- negotiation needed;
+- ICE restart;
+- signaling connect/disconnect/retry;
+- início/fim/perda da track de stream;
+- redução automática de bitrate.
+
+Não registrar texto de chat, áudio ou vídeo.
 
 ## Registro 1440p60
 
-Para cada peer registrar no PR/release:
+Para cada peer registrar:
 
 - resolução realmente recebida;
 - FPS realmente recebido;
@@ -47,6 +70,19 @@ Para cada peer registrar no PR/release:
 - codec;
 - frames dropped;
 - CPU do transmissor;
-- uso de Video Encode/GPU no Gerenciador de Tarefas.
+- uso do mecanismo de Video Encode da GPU quando observável.
 
-A V1 só deve ser chamada de "1440p60 validada" quando um receptor reportar 2560×1440 e aproximadamente 60 FPS em hardware/rede compatíveis.
+A versão só deve ser chamada de **1440p60 validada em hardware** quando um receptor real reportar aproximadamente 2560×1440 / 60 FPS durante teste sustentado.
+
+## Métricas de desktop
+
+Registrar em máquina física antes/depois:
+
+- tamanho instalado/distribuição;
+- RAM idle após estabilização;
+- RAM durante call de voz;
+- RAM durante 1440p60;
+- quantidade de processos do CriaCord;
+- tempo até a janela estar utilizável.
+
+O CI fornece tamanho do executável e tempo do modo smoke-test. RAM/call e tempo visual real não devem ser inferidos a partir desses números.
