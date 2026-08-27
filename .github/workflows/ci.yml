@@ -24,10 +24,14 @@ jobs:
           workspaces: src-tauri
       - name: Install dependencies
         run: npm install --no-audit --no-fund
+      - name: Install signaling dependencies
+        run: npm install --prefix signaling --no-audit --no-fund
       - name: Typecheck renderer
         run: npm run typecheck
       - name: Unit tests
         run: npm test
+      - name: Signaling relay integration test
+        run: npm test --prefix signaling
       - name: Rust tests
         working-directory: src-tauri
         run: cargo test
@@ -35,7 +39,7 @@ jobs:
         run: npm run build
       - name: Build Tauri Windows app
         run: npx tauri build
-      - name: Validate lightweight executable
+      - name: Smoke-test and validate lightweight executable
         shell: pwsh
         run: |
           $exe = 'src-tauri/target/release/criacord.exe'
@@ -43,6 +47,11 @@ jobs:
           $size = (Get-Item $exe).Length
           Write-Host "Raw CriaCord.exe size: $([math]::Round($size / 1MB, 2)) MB"
           if ($size -gt 40MB) { throw 'Raw Tauri executable unexpectedly exceeds 40 MB' }
+          $sw = [Diagnostics.Stopwatch]::StartNew()
+          $process = Start-Process -FilePath $exe -ArgumentList '--smoke-test' -PassThru -Wait -NoNewWindow
+          $sw.Stop()
+          if ($process.ExitCode -ne 0) { throw "CriaCord smoke-test failed with $($process.ExitCode)" }
+          Write-Host "Tauri smoke-test startup/exit: $([math]::Round($sw.Elapsed.TotalMilliseconds)) ms"
       - name: Upload Windows build
         uses: actions/upload-artifact@v4
         with:
