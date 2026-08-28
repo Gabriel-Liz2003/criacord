@@ -10,59 +10,90 @@ permissions:
 jobs:
   apply-build:
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - name: Decode exact local patches
+
+      - name: Reconstruct and verify exact local patches
         shell: bash
         run: |
-          base64 -d .bootstrap/p1.patch.gz.b64 | gzip -dc > "$RUNNER_TEMP/p1.patch"
-          base64 -d .bootstrap/p2.patch.gz.b64 | gzip -dc > "$RUNNER_TEMP/p2.patch"
-      - name: Apply patches as the original two commits
+          cat \
+            .bootstrap/chunks/p1-000 \
+            .bootstrap/chunks/p1-001 \
+            .bootstrap/chunks/p1-002 \
+            .bootstrap/chunks/p1-003 \
+            .bootstrap/chunks/p1-004005 \
+            .bootstrap/chunks/p1-006 \
+            .bootstrap/chunks/p1-007 \
+            > "$RUNNER_TEMP/p1.b64"
+          cat .bootstrap/chunks/p2-000001 > "$RUNNER_TEMP/p2.b64"
+
+          base64 -d "$RUNNER_TEMP/p1.b64" | gzip -dc > "$RUNNER_TEMP/p1.patch"
+          base64 -d "$RUNNER_TEMP/p2.b64" | gzip -dc > "$RUNNER_TEMP/p2.patch"
+
+          echo "d174417aa100ba72c1bf902dbb9ed037e118b8b7d2471e1d61bf835f981a0661  $RUNNER_TEMP/p1.patch" | sha256sum -c -
+          echo "ec6db10dfc3df52adbe9f02ee9420b509844a299b0a94cdb6b21bfcccdfd7779  $RUNNER_TEMP/p2.patch" | sha256sum -c -
+
+      - name: Apply exact patches as final commits
         shell: bash
         run: |
           git config user.name "Codex"
           git config user.email "codex@openai.com"
           git checkout -B finalized 6ede15e49b67b86c4325ab9e9dc30db23a4e483e
+
           git apply --check "$RUNNER_TEMP/p1.patch"
           git apply "$RUNNER_TEMP/p1.patch"
           git add -A
           git commit -m "feat: harden Tauri internet P2P migration"
+
           git apply --check "$RUNNER_TEMP/p2.patch"
           git apply "$RUNNER_TEMP/p2.patch"
           git add -A
           git commit -m "docs: record release validation and deployment guidance"
+
       - uses: actions/setup-node@v6
         with:
           node-version: '22'
           cache: npm
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
+
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
+
       - name: Install signaling dependencies
         run: npm ci --prefix signaling --no-audit --no-fund
+
       - name: Typecheck
         run: npm run typecheck
+
       - name: Unit tests
         run: npm test
+
       - name: Signaling integration test
         run: npm test --prefix signaling
+
       - name: Lint
         run: npm run lint
+
       - name: Build web
         run: npm run build:web
+
       - name: Rust format check
         working-directory: src-tauri
         run: cargo fmt --check
+
       - name: Rust tests
         working-directory: src-tauri
         run: cargo test --locked
+
       - name: Build Tauri Windows app
         run: npx tauri build
+
       - name: Smoke test and size report
         shell: pwsh
         run: |
@@ -72,6 +103,7 @@ jobs:
           Write-Host "Raw CriaCord.exe size: $([math]::Round($size / 1MB, 2)) MB"
           & $exe --smoke-test
           if ($LASTEXITCODE -ne 0) { throw "Smoke test failed: $LASTEXITCODE" }
+
       - name: Upload Windows build
         uses: actions/upload-artifact@v4
         with:
@@ -80,6 +112,7 @@ jobs:
             src-tauri/target/release/criacord.exe
             src-tauri/target/release/bundle/nsis/*.exe
           if-no-files-found: error
+
       - name: Publish finalized branch
         shell: bash
         run: git push --force origin HEAD:agent/complete-tauri-p2p
